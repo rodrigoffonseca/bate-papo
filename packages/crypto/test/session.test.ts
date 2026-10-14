@@ -218,3 +218,13 @@ describe('utf8', () => {
     }
   });
 });
+
+describe('base64 com entradas hostis', () => {
+  it('recusa preenchimento excessivo rapidamente', () => {
+    expect(() => fromBase64('QQ===')).toThrow();
+    const start = Date.now();
+    expect(() => fromBase64('='.repeat(100_000) + 'A')).toThrow();
+    expect(() => fromBase64('A' + '='.repeat(100_000))).toThrow();
+    expect(Date.now() - start).toBeLessThan(100);
+  });
+});

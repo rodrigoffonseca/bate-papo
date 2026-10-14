@@ -94,7 +94,11 @@ export function toBase64(b: Uint8Array): string {
 }
 
 export function fromBase64(s: string): Uint8Array {
-  const clean = s.replace(/=+$/, '');
+  // No máximo dois "=" de preenchimento; qualquer outro "=" é inválido.
+  // (Sem regex: /=+$/ teria custo quadrático com entradas maliciosas.)
+  let end = s.length;
+  for (let i = 0; i < 2 && end > 0 && s[end - 1] === '='; i++) end--;
+  const clean = s.slice(0, end);
   if (clean.length % 4 === 1) throw new Error('base64 inválido');
   const out = new Uint8Array(Math.floor((clean.length * 3) / 4));
   let bits = 0;

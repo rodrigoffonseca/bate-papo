@@ -80,7 +80,7 @@ export class Api {
     readonly baseUrl: string,
     fetchImpl?: FetchLike,
   ) {
-    this.baseUrl = baseUrl.replace(/\/+$/, '');
+    this.baseUrl = trimTrailingSlashes(baseUrl);
     this.fetch = fetchImpl ?? ((url, init) => globalThis.fetch(url, init as RequestInit));
   }
 
@@ -259,6 +259,13 @@ export class Api {
   webSocketUrl(): string {
     return `${this.baseUrl.replace(/^http/, 'ws')}/v1/ws?token=${encodeURIComponent(this.token ?? '')}`;
   }
+}
+
+/** Remove as barras finais sem regex (uma regex aqui teria custo quadrático). */
+function trimTrailingSlashes(url: string): string {
+  let end = url.length;
+  while (end > 0 && url.charCodeAt(end - 1) === 47 /* '/' */) end--;
+  return url.slice(0, end);
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
