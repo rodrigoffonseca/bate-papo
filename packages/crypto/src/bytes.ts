@@ -30,9 +30,53 @@ export function readU32(b: Uint8Array, off: number): number {
   return new DataView(b.buffer, b.byteOffset + off, 4).getUint32(0);
 }
 
+// UTF-8 implementado aqui porque nem todo motor JavaScript (ex.: Hermes, do
+// React Native) oferece TextDecoder com validação estrita.
 export const utf8 = {
-  encode: (s: string): Uint8Array => new TextEncoder().encode(s),
-  decode: (b: Uint8Array): string => new TextDecoder('utf-8', { fatal: true }).decode(b),
+  encode(s: string): Uint8Array {
+    const out: number[] = [];
+    for (let i = 0; i < s.length; i++) {
+      let c = s.charCodeAt(i);
+      if (c >= 0xd800 && c <= 0xdbff && i + 1 < s.length) {
+        const d = s.charCodeAt(i + 1);
+        if (d >= 0xdc00 && d <= 0xdfff) {
+          c = 0x10000 + ((c - 0xd800) << 10) + (d - 0xdc00);
+          i++;
+        }
+      }
+      if (c >= 0xd800 && c <= 0xdfff) c = 0xfffd; // substituto isolado
+      if (c < 0x80) out.push(c);
+      else if (c < 0x800) out.push(0xc0 | (c >> 6), 0x80 | (c & 63));
+      else if (c < 0x10000) out.push(0xe0 | (c >> 12), 0x80 | ((c >> 6) & 63), 0x80 | (c & 63));
+      else out.push(0xf0 | (c >> 18), 0x80 | ((c >> 12) & 63), 0x80 | ((c >> 6) & 63), 0x80 | (c & 63));
+    }
+    return Uint8Array.from(out);
+  },
+
+  /** Decodifica UTF-8 estrito: lança erro em sequências inválidas. */
+  decode(b: Uint8Array): string {
+    let out = '';
+    for (let i = 0; i < b.length; ) {
+      const x = b[i]!;
+      let c: number;
+      let n: number;
+      let min: number;
+      if (x < 0x80) [c, n, min] = [x, 0, 0];
+      else if ((x & 0xe0) === 0xc0) [c, n, min] = [x & 0x1f, 1, 0x80];
+      else if ((x & 0xf0) === 0xe0) [c, n, min] = [x & 0x0f, 2, 0x800];
+      else if ((x & 0xf8) === 0xf0) [c, n, min] = [x & 0x07, 3, 0x10000];
+      else throw new Error('UTF-8 inválido');
+      for (let k = 1; k <= n; k++) {
+        const y = b[i + k];
+        if (y === undefined || (y & 0xc0) !== 0x80) throw new Error('UTF-8 inválido');
+        c = (c << 6) | (y & 0x3f);
+      }
+      if (c < min || c > 0x10ffff || (c >= 0xd800 && c <= 0xdfff)) throw new Error('UTF-8 inválido');
+      out += String.fromCodePoint(c);
+      i += n + 1;
+    }
+    return out;
+  },
 };
 
 const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';

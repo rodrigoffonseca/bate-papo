@@ -56,25 +56,46 @@ export class ApiError extends Error {
   }
 }
 
+/** Assinatura mínima de fetch usada pelo SDK (compatível com expo/fetch). */
+export type FetchLike = (
+  url: string,
+  init?: { method?: string; headers?: Record<string, string>; body?: string | Uint8Array },
+) => Promise<{
+  ok: boolean;
+  status: number;
+  statusText: string;
+  text(): Promise<string>;
+  arrayBuffer(): Promise<ArrayBuffer>;
+}>;
+
 export class Api {
   token: string | undefined;
+  private readonly fetch: FetchLike;
 
-  constructor(readonly baseUrl: string) {
+  /**
+   * @param fetchImpl implementação de fetch. No React Native use a de
+   *   `expo/fetch`, que envia corpos binários corretamente.
+   */
+  constructor(
+    readonly baseUrl: string,
+    fetchImpl?: FetchLike,
+  ) {
     this.baseUrl = baseUrl.replace(/\/+$/, '');
+    this.fetch = fetchImpl ?? ((url, init) => globalThis.fetch(url, init as RequestInit));
   }
 
   async request<T>(method: string, path: string, body?: unknown, raw?: Uint8Array): Promise<T> {
     const headers: Record<string, string> = {};
     if (this.token) headers.Authorization = `Bearer ${this.token}`;
-    let payload: BodyInit | undefined;
+    let payload: string | Uint8Array | undefined;
     if (raw) {
       headers['Content-Type'] = 'application/octet-stream';
-      payload = raw as unknown as BodyInit;
+      payload = raw;
     } else if (body !== undefined) {
       headers['Content-Type'] = 'application/json';
       payload = JSON.stringify(body);
     }
-    const res = await fetch(this.baseUrl + path, { method, headers, body: payload });
+    const res = await this.fetch(this.baseUrl + path, { method, headers, body: payload });
     if (res.status === 204) return undefined as T;
     const text = await res.text();
     const data = text ? JSON.parse(text) : {};
@@ -228,7 +249,7 @@ export class Api {
   }
 
   async downloadAttachment(id: string): Promise<Uint8Array> {
-    const res = await fetch(`${this.baseUrl}/v1/attachments/${encodeURIComponent(id)}`, {
+    const res = await this.fetch(`${this.baseUrl}/v1/attachments/${encodeURIComponent(id)}`, {
       headers: this.token ? { Authorization: `Bearer ${this.token}` } : {},
     });
     if (!res.ok) throw new ApiError(res.status, 'falha ao baixar anexo');

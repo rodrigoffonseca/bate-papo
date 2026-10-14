@@ -24,7 +24,7 @@ O Bate-Papo é um aplicativo de mensagens no estilo WhatsApp, pensado para o Bra
 | Grupos (criar, adicionar/remover membros, administradores, sair) | ✅ servidor + SDK |
 | Entrega em tempo real (WebSocket) e fila para quem está offline | ✅ servidor + SDK |
 | Número de segurança (verificação de identidade) e alerta de troca de chave | ✅ SDK |
-| Aplicativo móvel (Android/iOS) | 🚧 próximo passo |
+| Aplicativo móvel (Android/iOS) | 🚧 em construção: cadastro, perfil e conversas de texto prontos ([apps/mobile](apps/mobile/)) |
 
 ## Arquitetura em 30 segundos
 
@@ -41,6 +41,7 @@ O Bate-Papo é um aplicativo de mensagens no estilo WhatsApp, pensado para o Bra
 - [`server/`](server/) — servidor em Go: cadastro, diretório de chaves públicas, grupos, fila de entrega, anexos cifrados, WebSocket.
 - [`packages/crypto/`](packages/crypto/) — `@bate-papo/crypto`: X3DH, Double Ratchet, cifra de anexos, número de segurança.
 - [`packages/client/`](packages/client/) — `@bate-papo/client`: SDK em TypeScript usado pelos apps (cadastro, envio, recebimento, grupos).
+- [`apps/mobile/`](apps/mobile/) — app Android/iOS em React Native (Expo), com histórico cifrado no aparelho (SQLCipher + Keychain/Keystore).
 
 Detalhes em [docs/arquitetura-funcional.md](docs/arquitetura-funcional.md) (capacidades, fluxos e infraestrutura de operação), [docs/arquitetura.md](docs/arquitetura.md), [docs/seguranca.md](docs/seguranca.md) e [docs/api.md](docs/api.md).
 
@@ -102,10 +103,12 @@ BATEPAPO_TEST_DATABASE_URL=postgres://localhost/batepapo_test npm test
 
 **MVP (agora)**
 - [x] Servidor, protocolo criptográfico e SDK
-- [ ] App React Native (Expo): cadastro, lista de conversas, chat, câmera/galeria, gravação de áudio, grupos
+- [x] App React Native (Expo) — fatia 1: cadastro, perfil, conversas e chat de texto
+- [ ] App — fatia 2: fotos (câmera/galeria) e mensagens de voz
+- [ ] App — fatia 3: grupos e número de segurança com QR code
 - [ ] Notificações push sem conteúdo (apenas "você tem mensagens"), com opção sem Google/Apple via UnifiedPush
 - [ ] Rotação periódica da signed prekey
-- [ ] Armazenamento local cifrado (SQLCipher + Keychain/Keystore)
+- [x] Armazenamento local cifrado (SQLCipher + Keychain/Keystore)
 
 **Depois do MVP**
 - [ ] Auditoria de segurança independente

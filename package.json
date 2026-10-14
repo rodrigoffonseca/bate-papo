@@ -5,12 +5,13 @@
   "license": "GPL-3.0-or-later",
   "workspaces": [
     "packages/crypto",
-    "packages/client"
+    "packages/client",
+    "apps/mobile"
   ],
   "scripts": {
-    "build": "npm run build --workspaces",
-    "test": "npm test --workspaces",
-    "typecheck": "npm run build -w @bate-papo/crypto && npm run typecheck --workspaces"
+    "build": "npm run build -w @bate-papo/crypto -w @bate-papo/client",
+    "test": "npm test -w @bate-papo/crypto -w @bate-papo/client -w @bate-papo/mobile",
+    "typecheck": "npm run build -w @bate-papo/crypto -w @bate-papo/client && npm run typecheck --workspaces"
   },
   "engines": {
     "node": ">=22"

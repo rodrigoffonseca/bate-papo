@@ -202,3 +202,19 @@ describe('utilitários', () => {
     expect(safetyNumber(generateIdentityKeyPair().publicKey, 'alice', b, 'bob')).not.toBe(n);
   });
 });
+
+describe('utf8', () => {
+  it('equivale ao TextEncoder/TextDecoder padrão', () => {
+    for (const s of ['', 'olá', 'ação çãõ', 'emoji 🇧🇷👍🏽', '中文', 'a\u0000b', '\u{10FFFF}']) {
+      const b = utf8.encode(s);
+      expect(b).toEqual(new TextEncoder().encode(s));
+      expect(utf8.decode(b)).toBe(s);
+    }
+  });
+
+  it('rejeita sequências inválidas', () => {
+    for (const bad of [[0x80], [0xc3], [0xe2, 0x82], [0xc0, 0xaf], [0xed, 0xa0, 0x80], [0xf8, 0x88, 0x80, 0x80, 0x80], [0xf4, 0x90, 0x80, 0x80]]) {
+      expect(() => utf8.decode(new Uint8Array(bad))).toThrow();
+    }
+  });
+});
