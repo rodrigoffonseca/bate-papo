@@ -64,5 +64,12 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm run build
-      # O teste ponta a ponta compila e sobe o servidor Go.
+      - run: npm run lint -w @bate-papo/mobile
+      # Os testes ponta a ponta (SDK e app) compilam e sobem o servidor Go.
       - run: npm test
+      # Gera o bundle do app: pega erros de resolução de módulos sem aparelho.
+      - name: Bundle do app (Android)
+        working-directory: apps/mobile
+        run: npx expo export --platform android --output-dir /tmp/bundle
+        env:
+          EXPO_OFFLINE: '1'

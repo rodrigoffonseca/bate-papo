@@ -84,7 +84,8 @@ flowchart LR
 | | Limites por IP, telefone e usuário | servidor (memória) | ✅ (instância única) |
 | | Notificações push "acorde e sincronize" | servidor + gateway push | 🚧 |
 | | Métricas, painéis e alertas | servidor + stack de observabilidade | 🚧 |
-| Clientes | App Android/iOS (React Native) | `apps/mobile` | 🚧 |
+| Clientes | App Android/iOS (React Native): cadastro, perfil, conversas de texto | `apps/mobile` | ✅ (fatia 1) |
+| | App: fotos, áudio, grupos, número de segurança | `apps/mobile` | 🚧 |
 
 ---
 
@@ -136,10 +137,10 @@ flowchart TB
 
 | Componente | Responsabilidade | Dados que guarda |
 | --- | --- | --- |
-| **App** 🚧 | Interface, captura de câmera/galeria, gravação de áudio (Opus), compressão de imagem antes de cifrar, notificações locais | — |
+| **App** ✅ fatia 1 · 🚧 mídia e grupos | Interface, captura de câmera/galeria, gravação de áudio (Opus), compressão de imagem antes de cifrar, notificações locais | — |
 | **`@bate-papo/client`** ✅ | Cadastro, publicação de chaves, envio com *fan-out* em grupos, tratamento de `410`/`409`, sincronização e confirmação, reconexão do WebSocket, política de troca de identidade | token de sessão, `registration_id`, IDs de contatos confiáveis |
 | **`@bate-papo/crypto`** ✅ | X3DH, Double Ratchet, cifra de anexos, padding, número de segurança | — (puro, sem estado próprio) |
-| **Armazenamento seguro** 🚧 | Implementação de `ClientStorage` sobre Keychain (iOS) / Keystore (Android) para a chave mestra e SQLCipher para sessões e histórico | chaves privadas, sessões, histórico de conversas |
+| **Armazenamento seguro** ✅ | Chave de 256 bits no Keychain (iOS) / Keystore (Android); `ClientStorage` e histórico num banco SQLCipher | chaves privadas, sessões, histórico de conversas |
 
 O histórico de conversas **só existe nos aparelhos**. O servidor não é fonte de histórico.
 
@@ -507,7 +508,7 @@ Resumo do que falta, em ordem sugerida:
 
 | # | Item | Bloqueia | Esforço |
 | --- | --- | --- | --- |
-| 1 | App React Native + `ClientStorage` seguro (Keychain/Keystore + SQLCipher) | lançamento | grande |
+| 1 | App React Native: fotos, áudio e grupos (cadastro, conversas de texto e armazenamento seguro já feitos) | lançamento | médio |
 | 2 | Notificações push (registro de *endpoint*, push vazio, UnifiedPush/FCM/APNs) | uso real no celular | médio |
 | 3 | Endpoint `/metrics` e painéis | operação nível 2 | pequeno |
 | 4 | Lista de países permitidos para SMS, limite global e atestação do aparelho | abuso/custo de SMS | pequeno–médio |

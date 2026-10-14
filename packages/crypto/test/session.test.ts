@@ -202,3 +202,29 @@ describe('utilitários', () => {
     expect(safetyNumber(generateIdentityKeyPair().publicKey, 'alice', b, 'bob')).not.toBe(n);
   });
 });
+
+describe('utf8', () => {
+  it('equivale ao TextEncoder/TextDecoder padrão', () => {
+    for (const s of ['', 'olá', 'ação çãõ', 'emoji 🇧🇷👍🏽', '中文', 'a\u0000b', '\u{10FFFF}']) {
+      const b = utf8.encode(s);
+      expect(b).toEqual(new TextEncoder().encode(s));
+      expect(utf8.decode(b)).toBe(s);
+    }
+  });
+
+  it('rejeita sequências inválidas', () => {
+    for (const bad of [[0x80], [0xc3], [0xe2, 0x82], [0xc0, 0xaf], [0xed, 0xa0, 0x80], [0xf8, 0x88, 0x80, 0x80, 0x80], [0xf4, 0x90, 0x80, 0x80]]) {
+      expect(() => utf8.decode(new Uint8Array(bad))).toThrow();
+    }
+  });
+});
+
+describe('base64 com entradas hostis', () => {
+  it('recusa preenchimento excessivo rapidamente', () => {
+    expect(() => fromBase64('QQ===')).toThrow();
+    const start = Date.now();
+    expect(() => fromBase64('='.repeat(100_000) + 'A')).toThrow();
+    expect(() => fromBase64('A' + '='.repeat(100_000))).toThrow();
+    expect(Date.now() - start).toBeLessThan(100);
+  });
+});

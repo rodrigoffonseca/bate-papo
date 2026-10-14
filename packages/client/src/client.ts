@@ -17,7 +17,16 @@ import {
   utf8,
 } from '@bate-papo/crypto';
 
-import { Api, ApiError, type Envelope, type Group, type OutgoingMessage, type User, parseEnvelope } from './api.js';
+import {
+  Api,
+  ApiError,
+  type Envelope,
+  type FetchLike,
+  type Group,
+  type OutgoingMessage,
+  type User,
+  parseEnvelope,
+} from './api.js';
 import type { AttachmentPointer, Payload, ReceivedMessage } from './messages.js';
 import { validatePayload } from './messages.js';
 import type { ClientStorage } from './storage.js';
@@ -44,6 +53,8 @@ type Listener<T> = (e: T) => void;
 
 export interface ClientOptions {
   serverUrl: string;
+  /** Implementação de fetch (no React Native, a de `expo/fetch`). */
+  fetch?: FetchLike;
   storage: ClientStorage;
   /**
    * O que fazer quando a chave de identidade de um contato muda (ex.: ele
@@ -74,7 +85,7 @@ export class BatePapoClient {
   private reconnectDelay = 1000;
 
   constructor(opts: ClientOptions) {
-    this.api = new Api(opts.serverUrl);
+    this.api = new Api(opts.serverUrl, opts.fetch);
     this.storage = opts.storage;
     this.policy = opts.identityChangePolicy ?? 'accept';
   }
@@ -260,9 +271,13 @@ export class BatePapoClient {
 
   // ---- envio ----
 
-  sendText(target: Target, text: string) {
+  /**
+   * @param opts.id ID da mensagem, se o app já o gerou (ex.: para exibi-la
+   *   como "enviando" antes da confirmação do servidor).
+   */
+  sendText(target: Target, text: string, opts: { id?: string } = {}) {
     if (!text) throw new Error('mensagem vazia');
-    return this.send(target, { kind: 'text', text });
+    return this.send(target, { kind: 'text', text }, opts.id);
   }
 
   sendImage(target: Target, data: Uint8Array, meta: { mime: string; width?: number; height?: number; caption?: string }) {
@@ -302,10 +317,14 @@ export class BatePapoClient {
     return decryptAttachment(ciphertext, fromBase64(pointer.key), fromBase64(pointer.digest));
   }
 
-  private async send(target: Target, content: Pick<Payload, 'kind' | 'text' | 'attachment'>): Promise<Payload> {
+  private async send(
+    target: Target,
+    content: Pick<Payload, 'kind' | 'text' | 'attachment'>,
+    id: string = newMessageId(),
+  ): Promise<Payload> {
     const payload: Payload = {
       v: 1,
-      id: randomId(),
+      id,
       ...content,
       ...('groupId' in target && { groupId: target.groupId }),
       senderRegistrationId: await this.registrationId(),
@@ -418,7 +437,7 @@ export class BatePapoClient {
       } else if (msg.type === 'envelope') {
         const env = parseEnvelope(msg.envelope);
         this.process(env)
-          .then(() => ws.readyState === WebSocket.OPEN && ws.send(JSON.stringify({ type: 'ack', ids: [env.id] })))
+          .then(() => ws.readyState === 1 /* OPEN */ && ws.send(JSON.stringify({ type: 'ack', ids: [env.id] })))
           .catch(() => undefined);
       }
     };
@@ -439,7 +458,8 @@ export class BatePapoClient {
   }
 }
 
-function randomId(): string {
+/** Gera um ID de mensagem (UUID v4). */
+export function newMessageId(): string {
   const b = crypto.getRandomValues(new Uint8Array(16));
   b[6] = (b[6]! & 0x0f) | 0x40;
   b[8] = (b[8]! & 0x3f) | 0x80;
