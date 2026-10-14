@@ -9,6 +9,25 @@ export interface User {
   created_at: string;
 }
 
+export interface RegistrationResult {
+  token: string;
+  user: User;
+  new_account: boolean;
+}
+
+/**
+ * Alerta de segurança da conta.
+ * - registration_attempt: alguém confirmou o código SMS do seu número em
+ *   outro aparelho e foi barrado pelo PIN (indício de SIM swap);
+ * - pin_failed: PIN errado digitado em outro aparelho;
+ * - pin_blocked: tentativas de PIN esgotadas.
+ */
+export interface AccountAlert {
+  id: string;
+  kind: 'registration_attempt' | 'pin_failed' | 'pin_blocked' | string;
+  created_at: string;
+}
+
 export interface GroupMember {
   user_id: string;
   role: 'admin' | 'member';
@@ -107,8 +126,45 @@ export class Api {
     return this.request<{ expires_in: number; dev_code?: string }>('POST', '/v1/auth/request-code', { phone });
   }
 
+  /** Lança ApiError 423 (body.code = "registration_locked") se a conta tem PIN. */
   verify(phone: string, code: string) {
-    return this.request<{ token: string; user: User; new_account: boolean }>('POST', '/v1/auth/verify', { phone, code });
+    return this.request<RegistrationResult>('POST', '/v1/auth/verify', { phone, code });
+  }
+
+  unlock(lockToken: string, secret: { pin: string } | { recoveryCode: string }) {
+    return this.request<RegistrationResult>('POST', '/v1/auth/unlock', {
+      lock_token: lockToken,
+      ...('pin' in secret ? { pin: secret.pin } : { recovery_code: secret.recoveryCode }),
+    });
+  }
+
+  getLock() {
+    return this.request<{ enabled: boolean; created_at?: string; failed_attempts?: number }>('GET', '/v1/account/lock');
+  }
+
+  /** Define ou troca o PIN; devolve um novo código de recuperação. */
+  async setPin(pin: string): Promise<string> {
+    return (await this.request<{ recovery_code: string }>('PUT', '/v1/account/lock', { pin })).recovery_code;
+  }
+
+  removePin() {
+    return this.request<void>('DELETE', '/v1/account/lock');
+  }
+
+  async checkPin(pin: string): Promise<boolean> {
+    return (await this.request<{ ok: boolean }>('POST', '/v1/account/lock/check', { pin })).ok;
+  }
+
+  async newRecoveryCode(): Promise<string> {
+    return (await this.request<{ recovery_code: string }>('POST', '/v1/account/recovery-code')).recovery_code;
+  }
+
+  async listAlerts(): Promise<AccountAlert[]> {
+    return (await this.request<{ alerts: AccountAlert[] }>('GET', '/v1/account/alerts')).alerts;
+  }
+
+  ackAlerts(ids: string[]) {
+    return this.request<void>('POST', '/v1/account/alerts/ack', { ids });
   }
 
   logout() {

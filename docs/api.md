@@ -11,7 +11,24 @@
 | --- | --- | --- | --- |
 | POST | `/auth/request-code` | `{phone}` | `202 {expires_in}` (+ `dev_code` só em desenvolvimento). `429` se pedir de novo em menos de 1 min |
 | POST | `/auth/verify` | `{phone, code}` | `200 {token, user, new_account}` · `401` código inválido/expirado |
+| POST | `/auth/unlock` | `{lock_token, pin}` ou `{lock_token, recovery_code}` | `200` igual ao `verify` · erros com `code` |
 | POST | `/auth/logout` | — | `204` |
+
+Se a conta tem PIN e está em uso, `verify` responde `423 {code: "registration_locked", lock_token, attempts_left, expires_in}`. Sessões expiram após 90 dias sem uso.
+
+## Segurança da conta
+
+| Método | Rota | Corpo | Resposta |
+| --- | --- | --- | --- |
+| GET | `/account/lock` | — | `{enabled, created_at, failed_attempts}` |
+| PUT | `/account/lock` | `{pin}` | `{recovery_code}` (mostrar uma vez) |
+| DELETE | `/account/lock` | — | `204` |
+| POST | `/account/lock/check` | `{pin}` | `{ok}` |
+| POST | `/account/recovery-code` | — | `{recovery_code}` |
+| GET | `/account/alerts` | — | `{alerts: [{id, kind, created_at}]}` |
+| POST | `/account/alerts/ack` | `{ids}` | `204` |
+
+Detalhes e regras em [seguranca-da-conta.md](seguranca-da-conta.md).
 
 Telefones aceitos: E.164 (`+55 11 98765-4321`) ou nacional com DDD (`11987654321`, assume +55).
 
@@ -58,6 +75,7 @@ Chaves públicas têm 32 bytes; assinaturas, 64. Máximo de 500 *one-time prekey
 ```
 servidor → {"type": "ready"}
 servidor → {"type": "envelope", "envelope": {...}}
+servidor → {"type": "alert", "alert": {...}}       (alerta de segurança da conta)
 cliente  → {"type": "ack", "ids": ["..."]}
 ```
 

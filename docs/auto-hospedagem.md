@@ -24,7 +24,9 @@ Todas as opções são variáveis de ambiente (veja [.env.example](../.env.examp
 | `BATEPAPO_TRUST_PROXY_HEADERS` | `false` | `true` atrás de proxy reverso, para limitar por IP real |
 | `BATEPAPO_BLOB_DIR` | `./data/blobs` | Onde guardar anexos cifrados |
 | `BATEPAPO_MAX_ATTACHMENT_BYTES` | 25 MiB | Tamanho máximo de anexo |
-| `BATEPAPO_RETENTION_DAYS` | `30` | Validade de mensagens não entregues e anexos |
+| `BATEPAPO_RETENTION_DAYS` | `30` | Validade de mensagens não entregues, anexos e alertas de segurança |
+| `BATEPAPO_SESSION_IDLE_DAYS` | `90` | Sessões sem uso por esse tempo expiram |
+| `BATEPAPO_LOCK_INACTIVITY_DAYS` | `7` | Depois desse tempo sem uso do aparelho registrado, o PIN deixa de ser exigido (recuperação para quem perdeu tudo). Veja [seguranca-da-conta.md](seguranca-da-conta.md) |
 
 ### Webhook de SMS
 

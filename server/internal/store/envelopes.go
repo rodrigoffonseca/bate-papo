@@ -57,15 +57,25 @@ func (s *Store) AckEnvelopes(ctx context.Context, recipient uuid.UUID, ids []uui
 	return err
 }
 
-// PurgeExpired remove envelopes não entregues e registros de anexos mais
-// antigos que o período de retenção. Devolve os IDs dos anexos removidos para
-// que os arquivos sejam apagados do disco.
-func (s *Store) PurgeExpired(ctx context.Context, retention time.Duration) ([]uuid.UUID, error) {
-	if _, err := s.pool.Exec(ctx, `DELETE FROM envelopes WHERE created_at < now() - make_interval(secs => $1)`, retention.Seconds()); err != nil {
-		return nil, err
+// PurgeExpired apaga o que passou do prazo: envelopes não entregues e
+// alertas mais antigos que retention, sessões sem uso há mais de sessionIdle,
+// desafios vencidos e anexos expirados. Devolve os IDs dos anexos removidos
+// para que os arquivos sejam apagados do disco.
+func (s *Store) PurgeExpired(ctx context.Context, retention, sessionIdle time.Duration) ([]uuid.UUID, error) {
+	steps := []struct {
+		sql string
+		arg float64
+	}{
+		{`DELETE FROM envelopes WHERE created_at < now() - make_interval(secs => $1)`, retention.Seconds()},
+		{`DELETE FROM account_alerts WHERE created_at < now() - make_interval(secs => $1)`, retention.Seconds()},
+		{`DELETE FROM sessions WHERE last_used_at < now() - make_interval(secs => $1)`, sessionIdle.Seconds()},
+		{`DELETE FROM otp_challenges WHERE expires_at < now() - make_interval(secs => $1)`, 0},
+		{`DELETE FROM unlock_challenges WHERE expires_at < now() - make_interval(secs => $1)`, 0},
 	}
-	if _, err := s.pool.Exec(ctx, `DELETE FROM otp_challenges WHERE expires_at < now()`); err != nil {
-		return nil, err
+	for _, st := range steps {
+		if _, err := s.pool.Exec(ctx, st.sql, st.arg); err != nil {
+			return nil, err
+		}
 	}
 	rows, err := s.pool.Query(ctx, `DELETE FROM attachments WHERE expires_at < now() RETURNING id`)
 	if err != nil {

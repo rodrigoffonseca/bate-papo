@@ -12,7 +12,14 @@ import { fileURLToPath } from 'node:url';
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { KeyValueStorage, BatePapoClient, type ReceivedMessage } from '../src/index.js';
+import {
+  type AccountAlert,
+  BatePapoClient,
+  KeyValueStorage,
+  type ReceivedMessage,
+  RegistrationLockedError,
+  UnlockError,
+} from '../src/index.js';
 
 const dbUrl = process.env.BATEPAPO_TEST_DATABASE_URL;
 const serverDir = fileURLToPath(new URL('../../../server', import.meta.url));
@@ -201,5 +208,42 @@ describe.skipIf(!dbUrl)('ponta a ponta com o servidor', () => {
     const bob2 = new BatePapoClient({ serverUrl: baseUrl, storage: new KeyValueStorage() });
     await bob2.verifyCode(bob.phone, (await bob2.requestCode(bob.phone)).dev_code!);
     await expect(strict.sendText({ userId: bob.user.id }, 'oi de novo')).rejects.toThrow(/mudou/);
+  });
+
+  it('PIN de bloqueio barra quem tem só o SMS e avisa o dono', async () => {
+    const ana = await newUser('anapin');
+    const recovery = await ana.client.setPin('meu pin 2026');
+    expect(await ana.client.pinEnabled()).toBe(true);
+    const alerts: AccountAlert[] = [];
+    ana.client.on('accountAlert', (a) => alerts.push(a));
+    let online = false;
+    ana.client.on('connection', (c) => (online = c === 'connected'));
+    ana.client.connect();
+    await waitFor(() => (online ? true : undefined));
+
+    // "Atacante" com o chip da Ana.
+    const thief = new BatePapoClient({ serverUrl: baseUrl, storage: new KeyValueStorage() });
+    const err = await thief.verifyCode(ana.phone, (await thief.requestCode(ana.phone)).dev_code!).catch((e) => e);
+    expect(err).toBeInstanceOf(RegistrationLockedError);
+    const lockToken = (err as RegistrationLockedError).lockToken;
+    await waitFor(() => alerts.find((a) => a.kind === 'registration_attempt'));
+
+    const wrong = await thief.unlock(lockToken, { pin: 'chute 1234' }).catch((e) => e);
+    expect(wrong).toBeInstanceOf(UnlockError);
+    expect(wrong).toMatchObject({ reason: 'wrong_pin', attemptsLeft: 9 });
+    await waitFor(() => alerts.find((a) => a.kind === 'pin_failed'));
+    expect(await thief.unlock(lockToken, { recoveryCode: 'XXXX' }).catch((e) => e)).toMatchObject({
+      reason: 'wrong_recovery_code',
+    });
+    expect((await ana.client.accountAlerts()).length).toBeGreaterThanOrEqual(2);
+
+    // A Ana troca de celular usando o código de recuperação.
+    ana.client.disconnect();
+    const newPhone = new BatePapoClient({ serverUrl: baseUrl, storage: new KeyValueStorage() });
+    const again = await newPhone.verifyCode(ana.phone, (await newPhone.requestCode(ana.phone)).dev_code!).catch((e) => e);
+    const { user } = await newPhone.unlock((again as RegistrationLockedError).lockToken, { recoveryCode: recovery });
+    expect(user.id).toBe(ana.user.id);
+    expect(await newPhone.pinEnabled()).toBe(false); // código usado: precisa de novo PIN
+    expect(await newPhone.setPin('outro pin 2026')).not.toBe(recovery);
   });
 });

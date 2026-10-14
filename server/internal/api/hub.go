@@ -8,7 +8,8 @@ import (
 	"github.com/rodrigoffonseca/bate-papo/server/internal/store"
 )
 
-// Hub mantém as conexões WebSocket ativas e entrega envelopes em tempo real.
+// Hub mantém as conexões WebSocket ativas e entrega envelopes e alertas de
+// segurança em tempo real.
 // Funciona dentro de uma única instância; para escalar horizontalmente,
 // substitua por Postgres LISTEN/NOTIFY ou outro barramento.
 type Hub struct {
@@ -16,8 +17,11 @@ type Hub struct {
 	conns map[uuid.UUID]map[*subscriber]struct{}
 }
 
+// wsMessage é uma mensagem do servidor para o cliente no WebSocket.
+type wsMessage map[string]any
+
 type subscriber struct {
-	ch     chan *store.Envelope
+	ch     chan wsMessage
 	closed chan struct{}
 	once   sync.Once
 }
@@ -29,7 +33,7 @@ func NewHub() *Hub {
 }
 
 func (h *Hub) Subscribe(user uuid.UUID) *subscriber {
-	sub := &subscriber{ch: make(chan *store.Envelope, 256), closed: make(chan struct{})}
+	sub := &subscriber{ch: make(chan wsMessage, 256), closed: make(chan struct{})}
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.conns[user] == nil {
@@ -53,11 +57,20 @@ func (h *Hub) Unsubscribe(user uuid.UUID, sub *subscriber) {
 // estiver lenta demais, ela é encerrada; o cliente reconecta e busca o que
 // estiver pendente no banco.
 func (h *Hub) Notify(user uuid.UUID, env *store.Envelope) {
+	h.send(user, wsMessage{"type": "envelope", "envelope": env})
+}
+
+// NotifyAlert avisa as conexões do usuário sobre um alerta de segurança.
+func (h *Hub) NotifyAlert(user uuid.UUID, alert *store.AccountAlert) {
+	h.send(user, wsMessage{"type": "alert", "alert": alert})
+}
+
+func (h *Hub) send(user uuid.UUID, msg wsMessage) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	for sub := range h.conns[user] {
 		select {
-		case sub.ch <- env:
+		case sub.ch <- msg:
 		default:
 			sub.close()
 		}

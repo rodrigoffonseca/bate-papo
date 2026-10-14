@@ -1,4 +1,5 @@
-import { useLocalSearchParams } from 'expo-router';
+import { RegistrationLockedError } from '@bate-papo/client';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
 
@@ -11,6 +12,7 @@ const RESEND_AFTER_S = 60;
 
 export default function Codigo() {
   const service = useService();
+  const router = useRouter();
   const { phone = '', dev = '' } = useLocalSearchParams<{ phone: string; dev?: string }>();
   // Em desenvolvimento o servidor pode devolver o código, para agilizar testes.
   const [code, setCode] = useState(dev);
@@ -31,8 +33,15 @@ export default function Codigo() {
       await service.verifyCode(phone, code);
       // O Gate leva para a próxima tela.
     } catch (err) {
-      setError(errorMessage(err));
       setBusy(false);
+      if (err instanceof RegistrationLockedError) {
+        router.push({
+          pathname: '/desbloquear',
+          params: { phone, token: err.lockToken, left: String(err.attemptsLeft) },
+        });
+        return;
+      }
+      setError(errorMessage(err));
     }
   };
 

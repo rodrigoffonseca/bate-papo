@@ -4,12 +4,13 @@ import { KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { errorMessage } from '@/components/format';
-import { Button, Field, Screen, Title, Txt } from '@/components/ui';
-import { useService } from '@/platform/app';
+import { Banner, Button, Field, Screen, Title, Txt } from '@/components/ui';
+import { useAppState, useService } from '@/platform/app';
 import { spacing } from '@/theme';
 
 export default function Entrar() {
   const service = useService();
+  const { signedOutReason } = useAppState();
   const router = useRouter();
   const [phone, setPhone] = useState('');
   const [busy, setBusy] = useState(false);
@@ -31,6 +32,12 @@ export default function Entrar() {
   return (
     <Screen>
       <SafeAreaView style={{ flex: 1 }}>
+        {signedOutReason === 'session-ended' && (
+          <Banner>
+            Você foi desconectado: sua conta foi registrada em outro aparelho ou ficou muito tempo sem uso. Se não foi
+            você, entre de novo e procure sua operadora: pode ser clonagem de chip.
+          </Banner>
+        )}
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
           <ScrollView contentContainerStyle={{ padding: spacing.lg, gap: spacing.lg, flexGrow: 1, justifyContent: 'center' }}>
             <Title>Bate-Papo</Title>

@@ -107,6 +107,7 @@ func (s *Store) RegisterDevice(ctx context.Context, phoneHash, tokenHash []byte)
 				`DELETE FROM identity_keys WHERE user_id = $1`,
 				`DELETE FROM one_time_prekeys WHERE user_id = $1`,
 				`DELETE FROM envelopes WHERE recipient_id = $1`,
+				`DELETE FROM unlock_challenges WHERE user_id = $1`,
 			} {
 				if _, err := tx.Exec(ctx, q, u.ID); err != nil {
 					return err
@@ -116,17 +117,47 @@ func (s *Store) RegisterDevice(ctx context.Context, phoneHash, tokenHash []byte)
 			return err
 		}
 		user = u
+		if _, err := tx.Exec(ctx, `UPDATE users SET last_seen_at = now() WHERE id = $1`, u.ID); err != nil {
+			return err
+		}
 		_, err = tx.Exec(ctx, `INSERT INTO sessions (token_hash, user_id) VALUES ($1, $2)`, tokenHash, u.ID)
 		return err
 	})
 	return user, isNew, err
 }
 
-func (s *Store) UserBySession(ctx context.Context, tokenHash []byte) (*User, error) {
-	return scanUser(s.pool.QueryRow(ctx, `
-		SELECT u.id, u.username, u.display_name, u.created_at
+// UserBySession devolve o dono da sessão. Sessões sem uso há mais de idle
+// expiram. O uso é registrado (com granularidade de alguns minutos) na sessão
+// e na conta: a última atividade da conta decide se o bloqueio por PIN vale.
+func (s *Store) UserBySession(ctx context.Context, tokenHash []byte, idle time.Duration) (*User, error) {
+	var u User
+	var lastUsed time.Time
+	err := s.pool.QueryRow(ctx, `
+		SELECT u.id, u.username, u.display_name, u.created_at, s.last_used_at
 		  FROM sessions s JOIN users u ON u.id = s.user_id
-		 WHERE s.token_hash = $1`, tokenHash))
+		 WHERE s.token_hash = $1 AND s.last_used_at > now() - make_interval(secs => $2)`,
+		tokenHash, idle.Seconds()).Scan(&u.ID, &u.Username, &u.DisplayName, &u.CreatedAt, &lastUsed)
+	if err != nil {
+		return nil, notFound(err)
+	}
+	if time.Since(lastUsed) > touchInterval {
+		if err := s.TouchSession(ctx, tokenHash, u.ID); err != nil {
+			return nil, err
+		}
+	}
+	return &u, nil
+}
+
+// touchInterval evita uma escrita no banco a cada requisição.
+const touchInterval = 5 * time.Minute
+
+// TouchSession marca a sessão e a conta como ativas agora.
+func (s *Store) TouchSession(ctx context.Context, tokenHash []byte, userID uuid.UUID) error {
+	if _, err := s.pool.Exec(ctx, `UPDATE sessions SET last_used_at = now() WHERE token_hash = $1`, tokenHash); err != nil {
+		return err
+	}
+	_, err := s.pool.Exec(ctx, `UPDATE users SET last_seen_at = now() WHERE id = $1`, userID)
+	return err
 }
 
 func (s *Store) DeleteSession(ctx context.Context, tokenHash []byte) error {

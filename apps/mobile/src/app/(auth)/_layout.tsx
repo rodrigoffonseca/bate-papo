@@ -16,6 +16,7 @@ export default function AuthLayout() {
     >
       <Stack.Screen name="entrar" options={{ headerShown: false }} />
       <Stack.Screen name="codigo" />
+      <Stack.Screen name="desbloquear" />
       <Stack.Screen name="perfil" options={{ headerBackVisible: false, gestureEnabled: false }} />
     </Stack>
   );
