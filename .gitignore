@@ -1,0 +1,12 @@
+node_modules/
+dist/
+*.tsbuildinfo
+coverage/
+
+# Servidor
+/server/batepapo-server
+/server/data/
+/data/
+
+.env
+.DS_Store
