@@ -83,6 +83,7 @@ O que está no roteiro para reduzir metadados: *sealed sender* (esconder o remet
 ## Proteções do servidor
 
 - Telefone guardado como HMAC; tokens e códigos guardados como hash.
+- **Conta protegida por PIN**: o código SMS sozinho não assume uma conta existente (proteção contra SIM swap), com código de recuperação, alertas ao dono e expiração de sessões. Especificação e roteiro em [seguranca-da-conta.md](seguranca-da-conta.md).
 - Código SMS: 6 dígitos, 10 minutos, 5 tentativas, uso único; limite de pedidos por número e por IP (limites por IP generosos por causa do CGNAT das operadoras móveis).
 - Limite de buscas por telefone e de consumo de *prekeys* por usuário (contra enumeração e esgotamento de chaves).
 - Logs sem IP, sem query string e sem cabeçalhos.
@@ -94,6 +95,7 @@ O que está no roteiro para reduzir metadados: *sealed sender* (esconder o remet
 
 - **Sem auditoria independente** ainda.
 - Um aparelho por conta.
+- O hash do PIN fica no banco: se o banco vazar, PINs curtos podem ser descobertos offline (ver Fase 2a em [seguranca-da-conta.md](seguranca-da-conta.md)).
 - *Signed prekey* não é rotacionada periodicamente (rotação a cada reinstalação apenas).
 - O armazenamento local de chaves no app ainda precisa ser implementado sobre Keychain/Keystore e banco cifrado.
 - Remetente visível ao servidor (sem *sealed sender*).

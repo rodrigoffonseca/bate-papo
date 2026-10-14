@@ -7,6 +7,7 @@
     "@bate-papo/crypto": "0.1.0",
     "@expo/ui": "~57.0.23",
     "expo": "~57.0.28",
+    "expo-clipboard": "~57.0.2",
     "expo-constants": "~57.0.21",
     "expo-device": "~57.0.2",
     "expo-font": "~57.0.4",

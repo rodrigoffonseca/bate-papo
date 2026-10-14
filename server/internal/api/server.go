@@ -4,6 +4,7 @@ package api
 import (
 	"context"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"io"
@@ -41,21 +42,24 @@ type Server struct {
 	verifyLimiter *RateLimiter // por IP
 	lookupLimiter *RateLimiter // por usuário
 	bundleLimiter *RateLimiter // por usuário
+	// pinCheckLimiter: conferência do PIN pelo próprio dono (lembrete).
+	pinCheckLimiter *RateLimiter // por usuário
 }
 
 func New(cfg *config.Config, st *store.Store, blobs *blob.FS, sender sms.Sender, log *slog.Logger) *Server {
 	return &Server{
-		cfg:           cfg,
-		store:         st,
-		blobs:         blobs,
-		sms:           sender,
-		log:           log,
-		hub:           NewHub(),
-		otpLimiter:    NewRateLimiter(60, time.Hour),
-		phoneLimiter:  NewRateLimiter(5, time.Hour),
-		verifyLimiter: NewRateLimiter(300, time.Hour),
-		lookupLimiter: NewRateLimiter(120, time.Hour),
-		bundleLimiter: NewRateLimiter(600, time.Hour),
+		cfg:             cfg,
+		store:           st,
+		blobs:           blobs,
+		sms:             sender,
+		log:             log,
+		hub:             NewHub(),
+		otpLimiter:      NewRateLimiter(60, time.Hour),
+		phoneLimiter:    NewRateLimiter(5, time.Hour),
+		verifyLimiter:   NewRateLimiter(300, time.Hour),
+		lookupLimiter:   NewRateLimiter(120, time.Hour),
+		bundleLimiter:   NewRateLimiter(600, time.Hour),
+		pinCheckLimiter: NewRateLimiter(10, time.Hour),
 	}
 }
 
@@ -67,7 +71,16 @@ func (s *Server) Handler() http.Handler {
 
 	mux.HandleFunc("POST /v1/auth/request-code", s.handleRequestCode)
 	mux.HandleFunc("POST /v1/auth/verify", s.handleVerify)
+	mux.HandleFunc("POST /v1/auth/unlock", s.handleUnlock)
 	mux.Handle("POST /v1/auth/logout", s.authed(s.handleLogout))
+
+	mux.Handle("GET /v1/account/lock", s.authed(s.handleGetLock))
+	mux.Handle("PUT /v1/account/lock", s.authed(s.handleSetLock))
+	mux.Handle("DELETE /v1/account/lock", s.authed(s.handleDeleteLock))
+	mux.Handle("POST /v1/account/lock/check", s.authed(s.handleCheckPin))
+	mux.Handle("POST /v1/account/recovery-code", s.authed(s.handleNewRecoveryCode))
+	mux.Handle("GET /v1/account/alerts", s.authed(s.handleListAlerts))
+	mux.Handle("POST /v1/account/alerts/ack", s.authed(s.handleAckAlerts))
 
 	mux.Handle("GET /v1/me", s.authed(s.handleGetMe))
 	mux.Handle("PATCH /v1/me", s.authed(s.handleUpdateMe))
@@ -106,7 +119,7 @@ func (s *Server) RunJanitor(ctx context.Context, every time.Duration) {
 	t := time.NewTicker(every)
 	defer t.Stop()
 	for {
-		ids, err := s.store.PurgeExpired(ctx, s.cfg.RetentionPeriod)
+		ids, err := s.store.PurgeExpired(ctx, s.cfg.RetentionPeriod, s.cfg.SessionIdle)
 		if err != nil {
 			s.log.Error("limpeza de dados expirados", "err", err)
 		}
@@ -120,6 +133,7 @@ func (s *Server) RunJanitor(ctx context.Context, every time.Duration) {
 		s.phoneLimiter.Cleanup()
 		s.lookupLimiter.Cleanup()
 		s.bundleLimiter.Cleanup()
+		s.pinCheckLimiter.Cleanup()
 		select {
 		case <-ctx.Done():
 			return
@@ -159,7 +173,7 @@ func (s *Server) authed(h http.HandlerFunc) http.Handler {
 			writeError(w, http.StatusUnauthorized, "autenticação necessária")
 			return
 		}
-		u, err := s.store.UserBySession(r.Context(), hashToken(tok))
+		u, err := s.store.UserBySession(r.Context(), hashToken(tok), s.cfg.SessionIdle)
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusUnauthorized, "sessão inválida")
 			return
@@ -245,4 +259,8 @@ func pathUUID(w http.ResponseWriter, r *http.Request, name string) (uuid.UUID, b
 		return uuid.Nil, false
 	}
 	return id, true
+}
+
+func constantTimeEqual(a, b []byte) bool {
+	return subtle.ConstantTimeCompare(a, b) == 1
 }

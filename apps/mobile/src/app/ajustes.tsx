@@ -1,3 +1,4 @@
+import { useRouter } from 'expo-router';
 import { useState } from 'react';
 import { Alert, ScrollView, View } from 'react-native';
 
@@ -9,6 +10,7 @@ import { spacing, useTheme } from '@/theme';
 
 export default function Ajustes() {
   const service = useService();
+  const router = useRouter();
   const { me } = useAppState();
   const t = useTheme();
   const [busy, setBusy] = useState(false);
@@ -48,6 +50,35 @@ export default function Ajustes() {
             ela é entregue.
           </Txt>
           <Txt muted style={{ fontSize: 12 }}>Servidor: {SERVER_URL}</Txt>
+        </View>
+
+        <View style={{ backgroundColor: t.surface, borderRadius: 12, padding: spacing.md, gap: spacing.sm }}>
+          <Txt style={{ fontWeight: '600' }}>🔑 Segurança da conta</Txt>
+          <Txt muted style={{ fontSize: 14 }}>
+            Seu PIN impede que alguém use sua conta mesmo clonando o seu chip. O código de recuperação substitui o PIN
+            se você esquecê-lo.
+          </Txt>
+          <Button variant="ghost" title="Trocar PIN" onPress={() => router.push('/pin?modo=trocar')} />
+          <Button
+            variant="ghost"
+            title="Gerar novo código de recuperação"
+            onPress={() =>
+              Alert.alert('Gerar novo código?', 'O código de recuperação atual deixará de funcionar.', [
+                { text: 'Cancelar', style: 'cancel' },
+                {
+                  text: 'Gerar',
+                  onPress: async () => {
+                    try {
+                      await service.newRecoveryCode();
+                      router.push('/recuperacao');
+                    } catch (err) {
+                      Alert.alert('Não foi possível gerar', errorMessage(err));
+                    }
+                  },
+                },
+              ])
+            }
+          />
         </View>
 
         <Button

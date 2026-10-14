@@ -26,7 +26,7 @@ import (
 // Os testes de integração precisam de um PostgreSQL descartável:
 //
 //	BATEPAPO_TEST_DATABASE_URL=postgres://batepapo@localhost:5432/batepapo_test go test ./...
-func newTestServer(t *testing.T) *httptest.Server {
+func newTestServer(t *testing.T, opts ...func(*config.Config)) *httptest.Server {
 	t.Helper()
 	url := os.Getenv("BATEPAPO_TEST_DATABASE_URL")
 	if url == "" {
@@ -51,6 +51,11 @@ func newTestServer(t *testing.T) *httptest.Server {
 		DevExposeOTP:       true,
 		MaxAttachmentBytes: 1 << 20,
 		RetentionPeriod:    time.Hour,
+		SessionIdle:        time.Hour,
+		LockInactivity:     time.Hour,
+	}
+	for _, o := range opts {
+		o(cfg)
 	}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	srv := New(cfg, st, blobs, sms.Console{Log: log}, log)

@@ -14,7 +14,9 @@ import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { directConversationId } from '../src/core/history';
-import { AppService } from '../src/core/service';
+import { RegistrationLockedError } from '@bate-papo/client';
+
+import { AppService, PIN_REMINDER_MS } from '../src/core/service';
 import { nodeSql } from './node-sql';
 
 const dbUrl = process.env.BATEPAPO_TEST_DATABASE_URL;
@@ -24,6 +26,7 @@ let server: ChildProcess | undefined;
 let baseUrl = '';
 let tmp = '';
 let seq = Date.now() % 10_000_000;
+const PIN = 'pin forte 2026';
 
 async function freePort(): Promise<number> {
   return new Promise((resolve) => {
@@ -54,8 +57,13 @@ async function signUp(name: string) {
   expect(app.getState().phase).toBe('needs-profile');
   const username = `${name}${seq}`;
   await app.saveProfile({ username, displayName: name[0]!.toUpperCase() + name.slice(1) });
-  expect(app.getState().phase).toBe('ready');
-  return { app, username, phone };
+  expect(app.getState().phase).toBe('needs-pin');
+  await app.setPin(PIN);
+  const recoveryCode = app.getState().recoveryCode!;
+  expect(recoveryCode).toMatch(/^[A-Z2-9]{4}(-[A-Z2-9]{4}){5}$/);
+  await app.recoveryCodeSaved();
+  expect(app.getState()).toMatchObject({ phase: 'ready', recoveryCode: null, pinReminderDue: false });
+  return { app, username, phone, recoveryCode };
 }
 
 describe.skipIf(!dbUrl)('serviço do app com o servidor', () => {
@@ -134,6 +142,8 @@ describe.skipIf(!dbUrl)('serviço do app com o servidor', () => {
     const phone = `(31) 9${String(++seq).padStart(8, '0')}`;
     await app.verifyCode(phone, (await app.requestCode(phone)).dev_code!);
     await app.saveProfile({ username: `duda${seq}`, displayName: 'Duda' });
+    await app.setPin(PIN);
+    await app.recoveryCodeSaved();
     const beto = await signUp('beto');
     const betoId = beto.app.getState().me!.id;
     const conv = await app.startConversation(beto.username);
@@ -161,7 +171,14 @@ describe.skipIf(!dbUrl)('serviço do app com o servidor', () => {
     const phone = `(21) 9${String(++seq).padStart(8, '0')}`;
     await app.verifyCode(phone, (await app.requestCode(phone)).dev_code!);
     await app.saveProfile({ username: `caio${seq}`, displayName: 'Caio' });
+    // Sem PIN definido, o app não libera as conversas.
     app.pause();
+    const halfway = new AppService({ db, serverUrl: baseUrl });
+    await halfway.init();
+    expect(halfway.getState().phase).toBe('needs-pin');
+    await halfway.setPin(PIN);
+    await halfway.recoveryCodeSaved();
+    halfway.pause();
 
     const reopened = new AppService({ db, serverUrl: baseUrl });
     await reopened.init();
@@ -172,5 +189,96 @@ describe.skipIf(!dbUrl)('serviço do app com o servidor', () => {
     const again = new AppService({ db, serverUrl: baseUrl });
     await again.init();
     expect(again.getState().phase).toBe('signed-out');
+  });
+
+  it('SIM swap: outro aparelho com o SMS é barrado pelo PIN e o dono é avisado', async () => {
+    const owner = await signUp('eva');
+    await until(() => (owner.app.getState().online ? true : undefined));
+
+    const thief = new AppService({ db: nodeSql(), serverUrl: baseUrl });
+    await thief.init();
+    const locked = await thief
+      .verifyCode(owner.phone, (await thief.requestCode(owner.phone)).dev_code!)
+      .catch((e: unknown) => e);
+    expect(locked).toBeInstanceOf(RegistrationLockedError);
+    expect(thief.getState().phase).toBe('signed-out');
+    await until(() => (owner.app.getState().accountAlerts.length ? true : undefined));
+    expect(owner.app.getState().accountAlerts[0]!.kind).toBe('registration_attempt');
+
+    const token = (locked as RegistrationLockedError).lockToken;
+    expect(await thief.unlock(token, { pin: 'chute 0000' }).catch((e: unknown) => e)).toMatchObject({
+      reason: 'wrong_pin',
+      attemptsLeft: 9,
+    });
+    await until(() => (owner.app.getState().accountAlerts.length === 2 ? true : undefined));
+    await owner.app.dismissAccountAlerts();
+    expect(owner.app.getState().accountAlerts).toEqual([]);
+
+    // O dono, trocando de celular, entra com o PIN e já fica pronto.
+    const newPhone = new AppService({ db: nodeSql(), serverUrl: baseUrl });
+    await newPhone.init();
+    const again = await newPhone
+      .verifyCode(owner.phone, (await newPhone.requestCode(owner.phone)).dev_code!)
+      .catch((e: unknown) => e);
+    await newPhone.unlock((again as RegistrationLockedError).lockToken, { pin: PIN });
+    expect(newPhone.getState()).toMatchObject({ phase: 'ready', me: { id: owner.app.getState().me!.id } });
+
+    owner.app.pause();
+    newPhone.pause();
+  });
+
+  it('código de recuperação libera a conta e exige um novo PIN', async () => {
+    const owner = await signUp('fabi');
+    owner.app.pause();
+    const newPhone = new AppService({ db: nodeSql(), serverUrl: baseUrl });
+    await newPhone.init();
+    const locked = await newPhone
+      .verifyCode(owner.phone, (await newPhone.requestCode(owner.phone)).dev_code!)
+      .catch((e: unknown) => e);
+    await newPhone.unlock((locked as RegistrationLockedError).lockToken, {
+      recoveryCode: owner.recoveryCode.toLowerCase(),
+    });
+    expect(newPhone.getState().phase).toBe('needs-pin');
+    await newPhone.setPin('novo pin 2027');
+    expect(newPhone.getState().recoveryCode).not.toBe(owner.recoveryCode);
+    await newPhone.recoveryCodeSaved();
+    expect(newPhone.getState().phase).toBe('ready');
+    newPhone.pause();
+  });
+
+  it('sessão encerrada por outro aparelho e lembrete periódico do PIN', async () => {
+    let now = Date.now();
+    const db = nodeSql();
+    const app = new AppService({ db, serverUrl: baseUrl, now: () => now });
+    await app.init();
+    const phone = `(41) 9${String(++seq).padStart(8, '0')}`;
+    await app.verifyCode(phone, (await app.requestCode(phone)).dev_code!);
+    await app.saveProfile({ username: `gil${seq}`, displayName: 'Gil' });
+    await app.setPin(PIN);
+    await app.recoveryCodeSaved();
+    app.pause();
+
+    // Duas semanas depois, o app pede para confirmar o PIN.
+    now += PIN_REMINDER_MS + 1000;
+    const later = new AppService({ db, serverUrl: baseUrl, now: () => now });
+    await later.init();
+    expect(later.getState()).toMatchObject({ phase: 'ready', pinReminderDue: true });
+    expect(await later.confirmPin('errado 123')).toBe(false);
+    expect(later.getState().pinReminderDue).toBe(true);
+    expect(await later.confirmPin(PIN)).toBe(true);
+    expect(later.getState().pinReminderDue).toBe(false);
+    later.pause();
+
+    // Outro aparelho assume a conta (com o PIN): este é desconectado.
+    const other = new AppService({ db: nodeSql(), serverUrl: baseUrl });
+    await other.init();
+    const locked = await other.verifyCode(phone, (await other.requestCode(phone)).dev_code!).catch((e: unknown) => e);
+    await other.unlock((locked as RegistrationLockedError).lockToken, { pin: PIN });
+    other.pause();
+
+    const reopened = new AppService({ db, serverUrl: baseUrl, now: () => now });
+    await reopened.init();
+    expect(reopened.getState()).toMatchObject({ phase: 'signed-out', signedOutReason: 'session-ended' });
+    expect(await reopened.history.listConversations()).toEqual([]);
   });
 });

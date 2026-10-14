@@ -33,6 +33,12 @@ type Config struct {
 	BlobDir            string
 	MaxAttachmentBytes int64
 	RetentionPeriod    time.Duration
+
+	// SessionIdle: sessões sem uso por esse tempo expiram.
+	SessionIdle time.Duration
+	// LockInactivity: o bloqueio por PIN deixa de valer se a conta ficar
+	// inativa por esse tempo (permite recuperar a conta sem o PIN).
+	LockInactivity time.Duration
 }
 
 func Load() (*Config, error) {
@@ -48,6 +54,8 @@ func Load() (*Config, error) {
 		BlobDir:            env("BATEPAPO_BLOB_DIR", "./data/blobs"),
 		MaxAttachmentBytes: 25 << 20,
 		RetentionPeriod:    30 * 24 * time.Hour,
+		SessionIdle:        90 * 24 * time.Hour,
+		LockInactivity:     7 * 24 * time.Hour,
 	}
 
 	if v := os.Getenv("BATEPAPO_MAX_ATTACHMENT_BYTES"); v != "" {
@@ -57,12 +65,21 @@ func Load() (*Config, error) {
 		}
 		c.MaxAttachmentBytes = n
 	}
-	if v := os.Getenv("BATEPAPO_RETENTION_DAYS"); v != "" {
-		n, err := strconv.Atoi(v)
-		if err != nil || n <= 0 {
-			return nil, fmt.Errorf("BATEPAPO_RETENTION_DAYS inválido: %q", v)
+	for _, d := range []struct {
+		env string
+		dst *time.Duration
+	}{
+		{"BATEPAPO_RETENTION_DAYS", &c.RetentionPeriod},
+		{"BATEPAPO_SESSION_IDLE_DAYS", &c.SessionIdle},
+		{"BATEPAPO_LOCK_INACTIVITY_DAYS", &c.LockInactivity},
+	} {
+		if v := os.Getenv(d.env); v != "" {
+			n, err := strconv.Atoi(v)
+			if err != nil || n <= 0 {
+				return nil, fmt.Errorf("%s inválido: %q", d.env, v)
+			}
+			*d.dst = time.Duration(n) * 24 * time.Hour
 		}
-		c.RetentionPeriod = time.Duration(n) * 24 * time.Hour
 	}
 
 	pepper := os.Getenv("BATEPAPO_PHONE_PEPPER")

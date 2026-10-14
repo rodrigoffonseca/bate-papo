@@ -15,7 +15,8 @@ O Bate-Papo é um aplicativo de mensagens no estilo WhatsApp, pensado para o Bra
 
 | Recurso | Situação |
 | --- | --- |
-| Cadastro com número de telefone (código por SMS) | ✅ servidor + SDK |
+| Cadastro com número de telefone (código por SMS) | ✅ servidor + SDK + app |
+| Proteção contra SIM swap: PIN obrigatório, código de recuperação e alertas ([detalhes](docs/seguranca-da-conta.md)) | ✅ servidor + SDK + app |
 | Nome de usuário (`@maria`) e nome de exibição | ✅ servidor + SDK |
 | Busca de contatos por nome de usuário ou telefone | ✅ servidor + SDK |
 | Mensagens de texto cifradas de ponta a ponta | ✅ servidor + SDK |
@@ -108,6 +109,8 @@ BATEPAPO_TEST_DATABASE_URL=postgres://localhost/batepapo_test npm test
 - [ ] App — fatia 3: grupos e número de segurança com QR code
 - [ ] Notificações push sem conteúdo (apenas "você tem mensagens"), com opção sem Google/Apple via UnifiedPush
 - [ ] Rotação periódica da signed prekey
+- [x] Segurança da conta — fase 1: PIN contra SIM swap, código de recuperação, alertas ([roteiro completo](docs/seguranca-da-conta.md#4-roteiro-até-a-versão-de-produção))
+- [ ] Segurança da conta — fase 2: *pepper* do PIN em HSM e passkeys
 - [x] Armazenamento local cifrado (SQLCipher + Keychain/Keystore)
 
 **Depois do MVP**

@@ -4,7 +4,7 @@ import { FlatList, Pressable, View } from 'react-native';
 import { formatListDate } from '@/components/format';
 import { Avatar, Banner, Button, Screen, Txt } from '@/components/ui';
 import type { Conversation } from '@/core/history';
-import { useAppState, useHistoryQuery } from '@/platform/app';
+import { useAppState, useHistoryQuery, useService } from '@/platform/app';
 import { spacing, useTheme } from '@/theme';
 
 function Row({ c }: { c: Conversation }) {
@@ -52,7 +52,8 @@ function Row({ c }: { c: Conversation }) {
 export default function Conversas() {
   const t = useTheme();
   const router = useRouter();
-  const { online } = useAppState();
+  const service = useService();
+  const { online, accountAlerts, pinReminderDue } = useAppState();
   const conversations = useHistoryQuery((h) => h.listConversations(), []);
 
   return (
@@ -71,6 +72,26 @@ export default function Conversas() {
           ),
         }}
       />
+      {accountAlerts.length > 0 && (
+        <View style={{ backgroundColor: t.warningBg, padding: spacing.md, gap: spacing.sm }} accessibilityLiveRegion="assertive">
+          <Txt style={{ color: t.warningText, fontWeight: '700' }}>⚠️ Tentativa de acesso à sua conta</Txt>
+          <Txt style={{ color: t.warningText, fontSize: 14 }}>
+            {accountAlerts.some((a) => a.kind === 'registration_attempt')
+              ? 'Alguém confirmou o código SMS do seu número em outro celular e foi barrado pelo seu PIN. '
+              : 'Alguém errou o seu PIN em outro celular. '}
+            Se não foi você, seu chip pode ter sido clonado: procure sua operadora. Nunca informe seu PIN nem o código
+            de recuperação a ninguém.
+          </Txt>
+          <Button variant="ghost" title="Entendi" onPress={() => void service.dismissAccountAlerts()} />
+        </View>
+      )}
+      {pinReminderDue && accountAlerts.length === 0 && (
+        <Link href="/lembrete-pin" asChild>
+          <Pressable accessibilityRole="button">
+            <Banner>🔑 Confirme seu PIN para não esquecê-lo. Toque aqui.</Banner>
+          </Pressable>
+        </Link>
+      )}
       {!online && <Banner>Conectando…</Banner>}
       <FlatList
         data={conversations ?? []}

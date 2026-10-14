@@ -20,7 +20,9 @@ import {
 import {
   Api,
   ApiError,
+  type AccountAlert,
   type Envelope,
+  type RegistrationResult,
   type FetchLike,
   type Group,
   type OutgoingMessage,
@@ -47,6 +49,7 @@ interface Events {
   identityChanged: IdentityChange;
   decryptionError: { envelopeId: string; from: string; error: unknown };
   connection: 'connected' | 'disconnected';
+  accountAlert: AccountAlert;
 }
 
 type Listener<T> = (e: T) => void;
@@ -63,6 +66,38 @@ export interface ClientOptions {
    * até que o app chame trustIdentity().
    */
   identityChangePolicy?: 'accept' | 'reject';
+}
+
+/**
+ * A conta tem PIN: o código SMS confere, mas para assumi-la neste aparelho é
+ * preciso o PIN ou o código de recuperação (chame unlock()).
+ */
+export class RegistrationLockedError extends Error {
+  constructor(
+    readonly lockToken: string,
+    readonly attemptsLeft: number,
+    readonly expiresIn: number,
+  ) {
+    super('esta conta é protegida por PIN');
+    this.name = 'RegistrationLockedError';
+  }
+}
+
+export type UnlockFailure =
+  | 'wrong_pin' // PIN incorreto (veja attemptsLeft)
+  | 'pin_blocked' // tentativas esgotadas: só o código de recuperação vale
+  | 'wrong_recovery_code'
+  | 'expired' // passou o prazo: peça novo código SMS
+  | 'too_many_attempts'; // tentativas deste SMS esgotadas: peça novo código
+
+export class UnlockError extends Error {
+  constructor(
+    readonly reason: UnlockFailure,
+    readonly attemptsLeft?: number,
+  ) {
+    super(reason);
+    this.name = 'UnlockError';
+  }
 }
 
 export class IdentityChangedError extends Error {
@@ -135,7 +170,44 @@ export class BatePapoClient {
    * aparelho e publica as chaves públicas no servidor.
    */
   async verifyCode(phone: string, code: string): Promise<{ user: User; newAccount: boolean }> {
-    const r = await this.api.verify(phone, code);
+    let r: RegistrationResult;
+    try {
+      r = await this.api.verify(phone, code);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 423 && err.body.code === 'registration_locked') {
+        throw new RegistrationLockedError(
+          String(err.body.lock_token),
+          Number(err.body.attempts_left),
+          Number(err.body.expires_in),
+        );
+      }
+      throw err;
+    }
+    return this.finishRegistration(r);
+  }
+
+  /**
+   * Conclui o registro de uma conta protegida por PIN, com o PIN ou com o
+   * código de recuperação. Com o código de recuperação, o PIN antigo é
+   * removido: defina um novo com setPin().
+   */
+  async unlock(lockToken: string, secret: { pin: string } | { recoveryCode: string }) {
+    let r: RegistrationResult;
+    try {
+      r = await this.api.unlock(lockToken, secret);
+    } catch (err) {
+      const reasons: UnlockFailure[] = ['wrong_pin', 'pin_blocked', 'wrong_recovery_code', 'expired', 'too_many_attempts'];
+      const reason = err instanceof ApiError ? reasons.find((r) => r === err.body.code) : undefined;
+      if (reason) {
+        const left = (err as ApiError).body.attempts_left;
+        throw new UnlockError(reason, typeof left === 'number' ? left : undefined);
+      }
+      throw err;
+    }
+    return this.finishRegistration(r);
+  }
+
+  private async finishRegistration(r: RegistrationResult): Promise<{ user: User; newAccount: boolean }> {
     this.api.token = r.token;
     this.userId = r.user.id;
     await this.storage.setAuth({ token: r.token, userId: r.user.id });
@@ -236,7 +308,41 @@ export class BatePapoClient {
     return this.api.removeGroupMember(groupId, this.currentUserId);
   }
 
-  // ---- segurança ----
+  // ---- segurança da conta ----
+
+  /** Estado do PIN de bloqueio da conta. */
+  async pinEnabled(): Promise<boolean> {
+    return (await this.api.getLock()).enabled;
+  }
+
+  /** Define ou troca o PIN. Devolve o novo código de recuperação (mostre uma única vez). */
+  setPin(pin: string): Promise<string> {
+    return this.api.setPin(pin);
+  }
+
+  removePin() {
+    return this.api.removePin();
+  }
+
+  /** Confere o PIN (lembrete periódico). */
+  checkPin(pin: string): Promise<boolean> {
+    return this.api.checkPin(pin);
+  }
+
+  /** Gera um novo código de recuperação; o anterior deixa de valer. */
+  newRecoveryCode(): Promise<string> {
+    return this.api.newRecoveryCode();
+  }
+
+  accountAlerts(): Promise<AccountAlert[]> {
+    return this.api.listAlerts();
+  }
+
+  ackAccountAlerts(ids: string[]) {
+    return this.api.ackAlerts(ids);
+  }
+
+  // ---- segurança das conversas ----
 
   /** Número de segurança (60 dígitos) da conversa com um contato. */
   async safetyNumber(userId: string): Promise<string | undefined> {
@@ -434,6 +540,8 @@ export class BatePapoClient {
         this.reconnectDelay = 1000;
         this.emit('connection', 'connected');
         this.sync().catch(() => ws.close());
+      } else if (msg.type === 'alert') {
+        this.emit('accountAlert', msg.alert as AccountAlert);
       } else if (msg.type === 'envelope') {
         const env = parseEnvelope(msg.envelope);
         this.process(env)

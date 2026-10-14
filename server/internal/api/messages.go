@@ -158,6 +158,7 @@ func (s *Server) handleAck(w http.ResponseWriter, r *http.Request) {
 // cliente deve, após receber "ready", buscar o que estiver pendente via
 // GET /v1/messages (pode haver duplicatas; deduplique pelo id) e confirmar o
 // recebimento com {"type":"ack","ids":[...]} ou POST /v1/messages/ack.
+// Alertas de segurança da conta chegam como {"type":"alert","alert":{...}}.
 func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	me := currentUser(r)
 	// A autenticação é por token (não por cookie), então não há risco de
@@ -197,6 +198,7 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ping := time.NewTicker(30 * time.Second)
+	lastTouch := time.Now()
 	defer ping.Stop()
 	for {
 		select {
@@ -205,11 +207,19 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		case <-sub.closed:
 			conn.Close(websocket.StatusPolicyViolation, "reconecte")
 			return
-		case env := <-sub.ch:
-			if err := wsjson.Write(ctx, conn, map[string]any{"type": "envelope", "envelope": env}); err != nil {
+		case msg := <-sub.ch:
+			if err := wsjson.Write(ctx, conn, msg); err != nil {
 				return
 			}
 		case <-ping.C:
+			// Uma conexão aberta conta como atividade da conta (o bloqueio por
+			// PIN depende disso), mesmo sem outras requisições.
+			if time.Since(lastTouch) > time.Hour {
+				if err := s.store.TouchSession(ctx, hashToken(bearerToken(r)), me.ID); err != nil {
+					s.log.Error("registrando atividade", "err", err)
+				}
+				lastTouch = time.Now()
+			}
 			pctx, pcancel := context.WithTimeout(ctx, 10*time.Second)
 			err := conn.Ping(pctx)
 			pcancel()

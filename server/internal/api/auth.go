@@ -111,12 +111,26 @@ func (s *Server) handleVerify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var raw [32]byte
-	if _, err := rand.Read(raw[:]); err != nil {
+	// Conta protegida por PIN: o SMS sozinho não basta (proteção contra
+	// SIM swap). O dono legítimo é avisado na hora.
+	locked, err := s.checkRegistrationLock(w, r, ph)
+	if err != nil {
 		s.internalError(w, r, err)
 		return
 	}
-	token := base64.RawURLEncoding.EncodeToString(raw[:])
+	if !locked {
+		s.completeRegistration(w, r, ph)
+	}
+}
+
+// completeRegistration cria a conta (ou assume a existente) neste aparelho e
+// responde com o token da nova sessão.
+func (s *Server) completeRegistration(w http.ResponseWriter, r *http.Request, ph []byte) {
+	token, err := randomToken()
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
 	user, isNew, err := s.store.RegisterDevice(r.Context(), ph, hashToken(token))
 	if err != nil {
 		s.internalError(w, r, err)
@@ -129,6 +143,14 @@ func (s *Server) handleVerify(w http.ResponseWriter, r *http.Request) {
 		"user":        user,
 		"new_account": isNew,
 	})
+}
+
+func randomToken() (string, error) {
+	var raw [32]byte
+	if _, err := rand.Read(raw[:]); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(raw[:]), nil
 }
 
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {

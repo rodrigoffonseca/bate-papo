@@ -18,10 +18,13 @@ function Gate() {
   useEffect(() => {
     if (phase === 'loading') return;
     SplashScreen.hideAsync();
-    const [group, screen] = segments as string[];
-    const inAuth = group === '(auth)';
+    const [first, second] = segments as string[];
+    const inAuth = first === '(auth)';
+    const screen = inAuth ? second : first;
     if (phase === 'signed-out' && (!inAuth || screen === 'perfil')) router.replace('/entrar');
     else if (phase === 'needs-profile' && screen !== 'perfil') router.replace('/perfil');
+    // PIN obrigatório: até criá-lo (e guardar o código de recuperação), nada de conversas.
+    else if (phase === 'needs-pin' && screen !== 'pin' && screen !== 'recuperacao') router.replace('/pin');
     else if (phase === 'ready' && inAuth) router.replace('/');
   }, [phase, segments, router]);
 
@@ -39,6 +42,9 @@ function Gate() {
       <Stack.Screen name="nova" options={{ title: 'Nova conversa', presentation: 'modal' }} />
       <Stack.Screen name="chat/[id]" options={{ title: '' }} />
       <Stack.Screen name="ajustes" options={{ title: 'Ajustes' }} />
+      <Stack.Screen name="pin" options={{ title: '' }} />
+      <Stack.Screen name="recuperacao" options={{ title: '' }} />
+      <Stack.Screen name="lembrete-pin" options={{ title: 'Lembra seu PIN?', presentation: 'modal' }} />
     </Stack>
   );
 }
