@@ -110,7 +110,8 @@ BATEPAPO_TEST_DATABASE_URL=postgres://localhost/batepapo_test npm test
 - [ ] Notificações push sem conteúdo (apenas "você tem mensagens"), com opção sem Google/Apple via UnifiedPush
 - [ ] Rotação periódica da signed prekey
 - [x] Segurança da conta — fase 1: PIN contra SIM swap, código de recuperação, alertas ([roteiro completo](docs/seguranca-da-conta.md#4-roteiro-até-a-versão-de-produção))
-- [ ] Segurança da conta — fase 2: *pepper* do PIN em HSM e passkeys
+- [x] Segurança da conta — fase 2a: chave secreta do PIN fora do banco (variável de ambiente ou OpenBao)
+- [ ] Segurança da conta — fase 2b: passkeys
 - [x] Armazenamento local cifrado (SQLCipher + Keychain/Keystore)
 
 **Depois do MVP**

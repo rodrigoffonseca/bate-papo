@@ -1,13 +1,17 @@
 package api
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
 	"errors"
 	"strings"
 
+	"github.com/google/uuid"
 	"golang.org/x/crypto/argon2"
+
+	"github.com/rodrigoffonseca/bate-papo/server/internal/store"
 )
 
 // Parâmetros do Argon2id para o PIN (RFC 9106, perfil de memória reduzida).
@@ -34,16 +38,52 @@ func hashPin(pin string, salt []byte) []byte {
 	return argon2.IDKey([]byte(pin), salt, argonTime, argonMemory, argonThreads, argonKeyLen)
 }
 
-func newPinHash(pin string) (hash, salt []byte, err error) {
+// legacyPinScheme é o formato da fase 1: Argon2id sem chave secreta.
+const legacyPinScheme = "argon2id"
+
+// errPinKeyMismatch: o PIN foi gravado com outra chave secreta (configuração
+// trocada). Tratado como erro do servidor, nunca como PIN errado: senão o
+// dono teria tentativas descontadas sem ter errado nada.
+var errPinKeyMismatch = errors.New("PIN gravado com outra chave secreta; verifique BATEPAPO_PIN_PEPPER / OpenBao")
+
+func (s *Server) pinScheme() string { return "argon2id+" + s.pinKeyer.ID() }
+
+// newPinHash calcula HMAC(chave, Argon2id(PIN, sal)). A chave secreta fica
+// fora do banco (variável de ambiente ou OpenBao).
+func (s *Server) newPinHash(ctx context.Context, pin string) (hash, salt []byte, scheme string, err error) {
 	salt = make([]byte, 16)
 	if _, err := rand.Read(salt); err != nil {
-		return nil, nil, err
+		return nil, nil, "", err
 	}
-	return hashPin(pin, salt), salt, nil
+	hash, err = s.pinKeyer.MAC(ctx, hashPin(pin, salt))
+	if err != nil {
+		return nil, nil, "", err
+	}
+	return hash, salt, s.pinScheme(), nil
 }
 
-func pinMatches(pin string, salt, hash []byte) bool {
-	return subtle.ConstantTimeCompare(hashPin(pin, salt), hash) == 1
+// pinMatches confere o PIN. Hashes do formato antigo (sem chave) são
+// convertidos na hora, já que o PIN correto está em mãos.
+func (s *Server) pinMatches(ctx context.Context, userID uuid.UUID, pin string, lock *store.RegistrationLock) (bool, error) {
+	derived := hashPin(pin, lock.PinSalt)
+	switch lock.PinScheme {
+	case s.pinScheme():
+		return s.pinKeyer.Verify(ctx, derived, lock.PinHash)
+	case legacyPinScheme:
+		if subtle.ConstantTimeCompare(derived, lock.PinHash) != 1 {
+			return false, nil
+		}
+		if mac, err := s.pinKeyer.MAC(ctx, derived); err == nil {
+			err = s.store.UpgradePinHash(ctx, userID, legacyPinScheme, mac, s.pinScheme())
+			if err != nil {
+				s.log.Error("convertendo hash do PIN", "err", err)
+			}
+		}
+		return true, nil
+	default:
+		s.log.Error("esquema de PIN desconhecido", "scheme", lock.PinScheme, "configurado", s.pinScheme())
+		return false, errPinKeyMismatch
+	}
 }
 
 var errWeakPin = errors.New("o PIN deve ter ao menos 6 caracteres e não pode ser uma sequência ou repetição óbvia")

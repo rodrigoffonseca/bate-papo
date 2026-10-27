@@ -95,7 +95,7 @@ O que está no roteiro para reduzir metadados: *sealed sender* (esconder o remet
 
 - **Sem auditoria independente** ainda.
 - Um aparelho por conta.
-- O hash do PIN fica no banco: se o banco vazar, PINs curtos podem ser descobertos offline (ver Fase 2a em [seguranca-da-conta.md](seguranca-da-conta.md)).
+- A chave secreta do PIN fica fora do banco (variável de ambiente ou OpenBao), então um banco vazado não permite testar PINs. Mas quem controla o servidor inteiro ainda consegue; a proteção contra o próprio operador está no roteiro (Fase 7 em [seguranca-da-conta.md](seguranca-da-conta.md)).
 - *Signed prekey* não é rotacionada periodicamente (rotação a cada reinstalação apenas).
 - O armazenamento local de chaves no app ainda precisa ser implementado sobre Keychain/Keystore e banco cifrado.
 - Remetente visível ao servidor (sem *sealed sender*).

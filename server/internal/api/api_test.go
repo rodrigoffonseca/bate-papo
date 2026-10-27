@@ -19,6 +19,7 @@ import (
 
 	"github.com/rodrigoffonseca/bate-papo/server/internal/blob"
 	"github.com/rodrigoffonseca/bate-papo/server/internal/config"
+	"github.com/rodrigoffonseca/bate-papo/server/internal/pepper"
 	"github.com/rodrigoffonseca/bate-papo/server/internal/sms"
 	"github.com/rodrigoffonseca/bate-papo/server/internal/store"
 )
@@ -27,6 +28,23 @@ import (
 //
 //	BATEPAPO_TEST_DATABASE_URL=postgres://batepapo@localhost:5432/batepapo_test go test ./...
 func newTestServer(t *testing.T, opts ...func(*config.Config)) *httptest.Server {
+	t.Helper()
+	ts, _ := newTestEnv(t, randomLocalKeyer(t), opts...)
+	return ts
+}
+
+func randomLocalKeyer(t *testing.T) pepper.Keyer {
+	t.Helper()
+	k, err := pepper.NewLocal([]byte(fmt.Sprintf("chave-de-teste-%032d", time.Now().UnixNano())))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return k
+}
+
+// newTestEnv sobe o servidor com a chave do PIN indicada e devolve também o
+// store, para os testes inspecionarem o banco.
+func newTestEnv(t *testing.T, keyer pepper.Keyer, opts ...func(*config.Config)) (*httptest.Server, *store.Store) {
 	t.Helper()
 	url := os.Getenv("BATEPAPO_TEST_DATABASE_URL")
 	if url == "" {
@@ -58,10 +76,10 @@ func newTestServer(t *testing.T, opts ...func(*config.Config)) *httptest.Server 
 		o(cfg)
 	}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	srv := New(cfg, st, blobs, sms.Console{Log: log}, log)
+	srv := New(cfg, st, blobs, sms.Console{Log: log}, keyer, log)
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
-	return ts
+	return ts, st
 }
 
 type client struct {

@@ -18,6 +18,7 @@ import (
 
 	"github.com/rodrigoffonseca/bate-papo/server/internal/blob"
 	"github.com/rodrigoffonseca/bate-papo/server/internal/config"
+	"github.com/rodrigoffonseca/bate-papo/server/internal/pepper"
 	"github.com/rodrigoffonseca/bate-papo/server/internal/sms"
 	"github.com/rodrigoffonseca/bate-papo/server/internal/store"
 )
@@ -34,6 +35,8 @@ type Server struct {
 	sms   sms.Sender
 	log   *slog.Logger
 	hub   *Hub
+	// pinKeyer aplica a chave secreta do PIN, que fica fora do banco.
+	pinKeyer pepper.Keyer
 
 	// Limites por IP são generosos porque operadoras móveis brasileiras usam
 	// CGNAT intensamente (muitos usuários compartilham o mesmo IP).
@@ -46,8 +49,9 @@ type Server struct {
 	pinCheckLimiter *RateLimiter // por usuário
 }
 
-func New(cfg *config.Config, st *store.Store, blobs *blob.FS, sender sms.Sender, log *slog.Logger) *Server {
+func New(cfg *config.Config, st *store.Store, blobs *blob.FS, sender sms.Sender, pinKeyer pepper.Keyer, log *slog.Logger) *Server {
 	return &Server{
+		pinKeyer:        pinKeyer,
 		cfg:             cfg,
 		store:           st,
 		blobs:           blobs,

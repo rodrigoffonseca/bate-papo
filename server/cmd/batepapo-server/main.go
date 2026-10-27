@@ -4,6 +4,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -14,6 +15,7 @@ import (
 	"github.com/rodrigoffonseca/bate-papo/server/internal/api"
 	"github.com/rodrigoffonseca/bate-papo/server/internal/blob"
 	"github.com/rodrigoffonseca/bate-papo/server/internal/config"
+	"github.com/rodrigoffonseca/bate-papo/server/internal/pepper"
 	"github.com/rodrigoffonseca/bate-papo/server/internal/sms"
 	"github.com/rodrigoffonseca/bate-papo/server/internal/store"
 )
@@ -62,7 +64,13 @@ func run(log *slog.Logger) error {
 		return errors.New("BATEPAPO_SMS_PROVIDER desconhecido: " + cfg.SMSProvider)
 	}
 
-	srv := api.New(cfg, st, blobs, sender, log)
+	pinKeyer, err := newPinKeyer(ctx, cfg)
+	if err != nil {
+		return err
+	}
+	log.Info("chave secreta do PIN configurada", "provider", cfg.PinKeyProvider, "id", pinKeyer.ID())
+
+	srv := api.New(cfg, st, blobs, sender, pinKeyer, log)
 	go srv.RunJanitor(ctx, time.Hour)
 
 	httpSrv := &http.Server{
@@ -84,4 +92,25 @@ func run(log *slog.Logger) error {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	return httpSrv.Shutdown(shutdownCtx)
+}
+
+// newPinKeyer prepara a chave secreta do PIN e, com o OpenBao, confere na
+// partida que o serviço responde (melhor falhar agora do que no primeiro PIN).
+func newPinKeyer(ctx context.Context, cfg *config.Config) (pepper.Keyer, error) {
+	if cfg.PinKeyProvider == "local" {
+		return pepper.NewLocal(cfg.PinPepper)
+	}
+	t, err := pepper.NewTransit(pepper.TransitConfig{
+		Addr: cfg.OpenBao.Addr, Token: cfg.OpenBao.Token, TokenFile: cfg.OpenBao.TokenFile,
+		Mount: cfg.OpenBao.Mount, Key: cfg.OpenBao.Key,
+	})
+	if err != nil {
+		return nil, err
+	}
+	probe, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	if _, err := t.MAC(probe, []byte("batepapo-startup-check")); err != nil {
+		return nil, fmt.Errorf("testando o OpenBao: %w", err)
+	}
+	return t, nil
 }

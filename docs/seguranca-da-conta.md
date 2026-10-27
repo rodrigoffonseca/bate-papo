@@ -28,7 +28,7 @@ O **SIM jacker** é uma falha do chip e o app não tem como corrigi-la. Mas a co
 ## 2. Princípios
 
 1. **O SMS prova a posse do número, não a posse da conta.** Assumir uma conta existente exige um segundo fator.
-2. **Nenhum segredo que dá acesso à conta fica em claro no servidor.** PIN em Argon2id, código de recuperação e tokens só como hash.
+2. **Nenhum segredo que dá acesso à conta fica em claro no servidor.** O PIN é guardado como HMAC com uma chave secreta **fora do banco** sobre o Argon2id do PIN; código de recuperação e tokens, só como hash.
 3. **O dono é avisado na hora** de qualquer tentativa séria, com orientação prática ("procure sua operadora").
 4. **Recuperação sempre possível, mas lenta para quem não é o dono.** Esquecer tudo não pode significar perder a conta para sempre; também não pode virar uma porta para atacantes.
 5. **O conteúdo não depende da conta.** Tomar a conta não dá acesso ao histórico nem passa despercebido pelos contatos, que veem a troca de chave de segurança.
@@ -102,11 +102,11 @@ A cada 14 dias o app pede, numa faixa discreta e não bloqueante, que a pessoa c
 | Dado | Forma |
 | --- | --- |
 | Telefone | HMAC-SHA256 com *pepper* |
-| PIN | Argon2id (t=3, m=64 MiB, p=2, sal de 16 bytes); no máximo 4 cálculos simultâneos |
+| PIN | `HMAC-SHA256(chave secreta, Argon2id(PIN, sal))`. Argon2id com t=3, m=64 MiB, p=2 e sal de 16 bytes, no máximo 4 cálculos simultâneos. A chave secreta fica **fora do banco** (seção 3.9) e o banco guarda qual chave foi usada (`pin_scheme`) |
 | Código de recuperação | SHA-256 com prefixo de domínio (entropia alta dispensa função lenta) |
 | Token de sessão e `lock_token` | SHA-256 |
 
-### 3.7 O que acontece em cada ataque (com a Fase 1)
+### 3.7 O que acontece em cada ataque (Fases 1 e 2a)
 
 | Ataque | Resultado |
 | --- | --- |
@@ -115,7 +115,8 @@ A cada 14 dias o app pede, numa faixa discreta e não bloqueante, que a pessoa c
 | Engenharia social pelo PIN | Ainda possível: é o próximo elo fraco. Mitigado por avisos e, na Fase 2, por passkeys, que não podem ser "ditadas". |
 | Força bruta online no PIN | 5 tentativas por SMS e 10 no total. Com PIN de 6 dígitos (10⁶ combinações), a chance é ~0,001%. |
 | Força bruta no código de recuperação | Inviável (~2¹¹⁹ combinações). |
-| Vazamento do banco do servidor | O PIN pode ser testado offline (Argon2id deixa lento, mas um PIN de 6 dígitos cai). **É a principal limitação da Fase 1** (ver Fase 2). Tokens e códigos não são reutilizáveis a partir dos hashes. |
+| Vazamento **só** do banco do servidor | O PIN **não pode** ser testado offline: o hash depende da chave secreta, que não está no banco. Tokens e códigos não são reutilizáveis a partir dos hashes. |
+| Vazamento do banco **e** da chave secreta | Com o provedor `local`, quem tem acesso ao servidor inteiro (variáveis de ambiente) pode testar PINs offline. Com o OpenBao, a chave nunca sai de lá: o atacante precisa consultar o OpenBao, que registra cada consulta e pode limitar a taxa. Proteção completa contra o próprio operador só na Fase 7. |
 | Dono esquece PIN e código | A conta é liberada após 7 dias sem uso do aparelho antigo. As conversas antigas se perdem (só existiam naquele aparelho). |
 
 ### 3.8 Parâmetros
@@ -130,6 +131,56 @@ A cada 14 dias o app pede, numa faixa discreta e não bloqueante, que a pessoa c
 | Expiração de sessão sem uso | 90 dias | `BATEPAPO_SESSION_IDLE_DAYS` |
 | Lembrete do PIN | 14 dias | no app |
 | Retenção de alertas | 30 dias | `BATEPAPO_RETENTION_DAYS` |
+| Onde fica a chave secreta do PIN | variável de ambiente | `BATEPAPO_PIN_KEY_PROVIDER` (`local` ou `openbao`) |
+
+### 3.9 Chave secreta do PIN (Fase 2a)
+
+O hash do PIN só é útil para quem também tiver a chave secreta. Há dois provedores:
+
+| Provedor | Onde fica a chave | Quando usar |
+| --- | --- | --- |
+| `local` | Variável de ambiente `BATEPAPO_PIN_PEPPER` (32 bytes em hex), separada do banco e diferente de `BATEPAPO_PHONE_PEPPER` | Piloto e auto-hospedagem simples. Protege contra vazamento de backup ou dump do banco |
+| `openbao` | Dentro do **OpenBao** (ou HashiCorp Vault), motor *Transit*. O servidor só pede "calcule o HMAC disto" e a chave **nunca sai** do OpenBao | Produção. Cada uso fica registrado, a taxa pode ser limitada, a chave pode ser rotacionada e, conforme a instalação, protegida por HSM |
+
+Comportamento:
+- **Falha fechada:** se o OpenBao não responder, criar, trocar ou conferir PIN devolve `503` (`code: temporarily_unavailable`) e **nunca conta como PIN errado**. O servidor também se recusa a subir se o OpenBao não responder na partida.
+- **Chave trocada por engano:** o banco guarda qual chave gerou cada hash (`pin_scheme`). Se a configuração mudar, a conferência dá erro do servidor (e um log claro), sem descontar tentativas do dono.
+- **Rotação (OpenBao):** `bao write -f transit/keys/batepapo-pin/rotate`. Hashes antigos continuam valendo; os novos usam a versão nova.
+- **Migração:** PINs criados antes da Fase 2a (Argon2id puro) são convertidos automaticamente na primeira vez que o dono acerta o PIN.
+- **Perder a chave** significa que nenhum PIN confere mais. As contas continuam funcionando nos aparelhos atuais, onde o dono pode criar outro PIN, mas trocar de celular exigiria o código de recuperação ou a espera por inatividade. **Faça backup da chave** e guarde-o separado do backup do banco.
+
+#### Configurando o OpenBao
+
+```sh
+# 1. Motor Transit e a chave do PIN (não exportável por padrão)
+bao secrets enable transit
+bao write -f transit/keys/batepapo-pin
+
+# 2. Política mínima: o servidor só pode calcular e conferir HMAC com essa chave
+cat > batepapo-pin.hcl <<'HCL'
+path "transit/hmac/batepapo-pin/*"   { capabilities = ["update"] }
+path "transit/verify/batepapo-pin/*" { capabilities = ["update"] }
+HCL
+bao policy write batepapo-pin batepapo-pin.hcl
+
+# 3. Token periódico só com essa política (renove com um agente)
+bao token create -policy=batepapo-pin -period=24h -orphan
+
+# 4. Recomendado: registro de auditoria e limite de taxa para o Transit
+bao audit enable file file_path=/var/log/openbao/audit.log
+bao write sys/quotas/rate-limit/batepapo-pin path=transit/ rate=50
+```
+
+No servidor Bate-Papo:
+
+```sh
+BATEPAPO_PIN_KEY_PROVIDER=openbao
+BATEPAPO_OPENBAO_ADDR=https://bao.interno.exemplo.br:8200
+BATEPAPO_OPENBAO_TOKEN_FILE=/run/secrets/openbao-token   # relido a cada uso
+# opcionais: BATEPAPO_OPENBAO_MOUNT=transit  BATEPAPO_OPENBAO_KEY=batepapo-pin
+```
+
+Os nomes dos comandos seguem a CLI do OpenBao (`bao`); no HashiCorp Vault, troque `bao` por `vault`. Confira a disponibilidade de cotas de taxa e de HSM na versão que você usar.
 
 ---
 
@@ -140,7 +191,7 @@ A ordem segue o maior ganho de segurança pelo menor custo de experiência.
 | Fase | Entrega | Protege contra | Experiência do usuário | Esforço |
 | --- | --- | --- | --- | --- |
 | **1** ✅ | PIN obrigatório, código de recuperação, alertas, lembrete, expiração de sessões | SIM swap, interceptação de SMS, força bruta online | +1 etapa no cadastro; PIN só ao trocar de celular | feito |
-| **2a** | *Pepper* do PIN guardado em HSM/KMS | Força bruta offline após vazamento do banco | Nenhum impacto | pequeno |
+| **2a** ✅ | Chave secreta do PIN fora do banco (variável de ambiente ou OpenBao/Vault Transit) | Força bruta offline após vazamento do banco | Nenhum impacto | feito |
 | **2b** | **Passkeys** como fator preferido; PIN como alternativa | Engenharia social (passkey não pode ser ditada) e phishing | Melhor que o PIN: trocar de celular com Face ID ou digital | médio |
 | **3a** | **Vários aparelhos** e **vinculação por QR** | Dependência do SMS na troca de celular | Trocar de celular sem SMS, aprovando no aparelho antigo | grande |
 | **3b** | **Backup cifrado** opcional do histórico | Perda das conversas | Recuperar conversas num celular novo | médio |
@@ -150,11 +201,16 @@ A ordem segue o maior ganho de segurança pelo menor custo de experiência.
 | **7** | **PIN que o servidor não consegue testar** (OPRF/limiar entre servidores independentes) | Vazamento do banco **e** operador malicioso | Nenhum impacto | grande |
 | **Antes do 1.0** | Auditoria independente e programa de recompensa por falhas | O que nós não vimos | — | externo |
 
-### Fase 2a — *Pepper* do PIN em HSM/KMS
+### Fase 2a — Chave secreta do PIN fora do banco ✅
 
-- O resultado do Argon2id passa por um HMAC com uma chave que **nunca sai** de um módulo de hardware (HSM) ou serviço de chaves (KMS) hospedado no Brasil.
-- Um banco vazado deixa de servir para testar PINs: o atacante precisaria também consultar o HSM, que limita a taxa de consultas e registra cada uma.
-- É a melhoria de maior relação custo/benefício depois da Fase 1. Para quem auto-hospeda sem HSM, a chave pode ficar num cofre de segredos (Vault/OpenBao) separado do banco.
+Implementada; detalhes e configuração na seção 3.9.
+
+- O resultado do Argon2id passa por um HMAC com uma chave que não está no banco. Com o OpenBao, a chave **nunca sai** do serviço de chaves.
+- Um banco vazado deixa de servir para testar PINs: o atacante precisaria também consultar o OpenBao, que registra cada uso e limita a taxa.
+- **Próximos passos desta linha:**
+  - instalações grandes devem proteger a chave do OpenBao com HSM (selagem por PKCS#11) num datacenter no Brasil;
+  - estender o mesmo tratamento ao *pepper* do telefone;
+  - a proteção também contra o próprio operador é a Fase 7.
 
 ### Fase 2b — Passkeys
 
@@ -218,7 +274,7 @@ A ordem segue o maior ganho de segurança pelo menor custo de experiência.
 
 - [x] SMS não basta para assumir uma conta (Fase 1)
 - [x] Alertas ao dono e recuperação sem perder a conta (Fase 1)
-- [ ] *Pepper* do PIN fora do banco (Fase 2a)
+- [x] Chave secreta do PIN fora do banco (Fase 2a); em produção, com OpenBao
 - [ ] Passkeys disponíveis (Fase 2b)
 - [ ] Atestação do app e limites globais de SMS (Fase 4, parcial)
 - [ ] Auditoria de segurança independente, com correções publicadas
