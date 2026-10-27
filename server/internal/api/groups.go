@@ -59,6 +59,22 @@ func (s *Server) writeGroup(w http.ResponseWriter, r *http.Request, status int, 
 	writeJSON(w, status, g)
 }
 
+// notifyGroup avisa em tempo real os membros atuais do grupo (e os extras,
+// como quem acabou de ser removido) de que ele mudou. Quem fez a alteração já
+// tem a resposta e não é avisado.
+func (s *Server) notifyGroup(r *http.Request, gid uuid.UUID, extra ...uuid.UUID) {
+	members, err := s.store.GroupMemberIDs(r.Context(), gid)
+	if err != nil {
+		s.log.Error("listando membros para aviso de grupo", "err", err)
+	}
+	me := currentUser(r).ID
+	for _, id := range append(members, extra...) {
+		if id != me {
+			s.hub.NotifyGroup(id, gid)
+		}
+	}
+}
+
 func (s *Server) membersError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, store.ErrNotFound):
@@ -90,6 +106,7 @@ func (s *Server) handleCreateGroup(w http.ResponseWriter, r *http.Request) {
 		s.membersError(w, r, err)
 		return
 	}
+	s.notifyGroup(r, g.ID)
 	writeJSON(w, http.StatusCreated, g)
 }
 
@@ -130,6 +147,7 @@ func (s *Server) handleRenameGroup(w http.ResponseWriter, r *http.Request) {
 		s.internalError(w, r, err)
 		return
 	}
+	s.notifyGroup(r, gid)
 	s.writeGroup(w, r, http.StatusOK, gid)
 }
 
@@ -152,6 +170,7 @@ func (s *Server) handleAddMembers(w http.ResponseWriter, r *http.Request) {
 		s.membersError(w, r, err)
 		return
 	}
+	s.notifyGroup(r, gid)
 	s.writeGroup(w, r, http.StatusOK, gid)
 }
 
@@ -179,6 +198,7 @@ func (s *Server) handleRemoveMember(w http.ResponseWriter, r *http.Request) {
 		s.internalError(w, r, err)
 		return
 	}
+	s.notifyGroup(r, gid, target)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -210,6 +230,7 @@ func (s *Server) handleSetRole(w http.ResponseWriter, r *http.Request) {
 		s.internalError(w, r, err)
 		return
 	}
+	s.notifyGroup(r, gid)
 	s.writeGroup(w, r, http.StatusOK, gid)
 }
 

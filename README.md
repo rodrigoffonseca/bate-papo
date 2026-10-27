@@ -17,15 +17,15 @@ O Bate-Papo é um aplicativo de mensagens no estilo WhatsApp, pensado para o Bra
 | --- | --- |
 | Cadastro com número de telefone (código por SMS) | ✅ servidor + SDK + app |
 | Proteção contra SIM swap: PIN obrigatório, código de recuperação e alertas ([detalhes](docs/seguranca-da-conta.md)) | ✅ servidor + SDK + app |
-| Nome de usuário (`@maria`) e nome de exibição | ✅ servidor + SDK |
-| Busca de contatos por nome de usuário ou telefone | ✅ servidor + SDK |
-| Mensagens de texto cifradas de ponta a ponta | ✅ servidor + SDK |
+| Nome de usuário (`@maria`) e nome de exibição | ✅ servidor + SDK + app |
+| Busca de contatos por nome de usuário ou telefone | ✅ servidor + SDK + app |
+| Mensagens de texto cifradas de ponta a ponta | ✅ servidor + SDK + app |
 | Fotos e vídeos cifrados de ponta a ponta | ✅ servidor + SDK + app |
 | Mensagens de voz cifradas de ponta a ponta | ✅ servidor + SDK + app |
-| Grupos (criar, adicionar/remover membros, administradores, sair) | ✅ servidor + SDK |
-| Entrega em tempo real (WebSocket) e fila para quem está offline | ✅ servidor + SDK |
+| Grupos (criar, adicionar/remover membros, administradores, sair) | ✅ servidor + SDK + app |
+| Entrega em tempo real (WebSocket) e fila para quem está offline | ✅ servidor + SDK + app |
 | Número de segurança (verificação de identidade) e alerta de troca de chave | ✅ SDK |
-| Aplicativo móvel (Android/iOS) | 🚧 em construção: cadastro, perfil, conversas com texto, fotos, vídeos e voz prontos; faltam grupos ([apps/mobile](apps/mobile/)) |
+| Aplicativo móvel (Android/iOS) | 🚧 em construção: cadastro, perfil, conversas e grupos com texto, fotos, vídeos e voz prontos ([apps/mobile](apps/mobile/)) |
 
 ## Arquitetura em 30 segundos
 
@@ -106,7 +106,8 @@ BATEPAPO_TEST_DATABASE_URL=postgres://localhost/batepapo_test npm test
 - [x] Servidor, protocolo criptográfico e SDK
 - [x] App React Native (Expo) — fatia 1: cadastro, perfil, conversas e chat de texto
 - [x] App — fatia 2: fotos e vídeos (câmera/galeria) e mensagens de voz
-- [ ] App — fatia 3: grupos e número de segurança com QR code
+- [x] App — fatia 3: grupos (criar, conversar, participantes, administradores, sair)
+- [ ] App: número de segurança com QR code
 - [ ] Notificações push sem conteúdo (apenas "você tem mensagens"), com opção sem Google/Apple via UnifiedPush
 - [ ] Rotação periódica da signed prekey
 - [x] Segurança da conta — fase 1: PIN contra SIM swap, código de recuperação, alertas ([roteiro completo](docs/seguranca-da-conta.md#4-roteiro-até-a-versão-de-produção))

@@ -65,6 +65,13 @@ func (h *Hub) NotifyAlert(user uuid.UUID, alert *store.AccountAlert) {
 	h.send(user, wsMessage{"type": "alert", "alert": alert})
 }
 
+// NotifyGroup avisa que um grupo mudou (criado, renomeado, membros ou papéis
+// alterados). Só leva o ID: o cliente busca o estado atual, e quem foi
+// removido descobre isso ao receber 404.
+func (h *Hub) NotifyGroup(user uuid.UUID, groupID uuid.UUID) {
+	h.send(user, wsMessage{"type": "group", "group_id": groupID})
+}
+
 func (h *Hub) send(user uuid.UUID, msg wsMessage) {
 	h.mu.Lock()
 	defer h.mu.Unlock()

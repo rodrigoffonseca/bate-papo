@@ -1,4 +1,4 @@
-import { Stack, useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { Link, Stack, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useCallback, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, KeyboardAvoidingView, Platform, Pressable, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -27,14 +27,40 @@ function describe(m: Message): string {
   return m.text ?? '';
 }
 
-function Bubble({ m, onRetry }: { m: Message; onRetry: (id: string) => void }) {
+/** Aviso da conversa, como "Maria entrou no grupo". */
+function Notice({ m }: { m: Message }) {
   const t = useTheme();
+  return (
+    <View
+      accessible
+      accessibilityLabel={`${m.text}. ${formatTime(m.sentAt)}`}
+      style={{
+        alignSelf: 'center',
+        maxWidth: '85%',
+        backgroundColor: t.surface,
+        borderRadius: 10,
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+        marginVertical: 6,
+      }}
+    >
+      <Txt muted style={{ fontSize: 13, textAlign: 'center' }}>
+        {m.text}
+      </Txt>
+    </View>
+  );
+}
+
+function Bubble({ m, showSender, onRetry }: { m: Message; showSender: boolean; onRetry: (id: string) => void }) {
+  const t = useTheme();
+  if (m.kind === 'system') return <Notice m={m} />;
   const failed = m.status === 'failed';
   const media = m.kind === 'image' || m.kind === 'video' || m.kind === 'voice';
+  const sender = m.outgoing ? 'Você' : (m.senderName ?? 'Contato');
   return (
     <View
       accessible={!media}
-      accessibilityLabel={`${m.outgoing ? 'Você' : 'Contato'}: ${describe(m)}. ${formatTime(m.sentAt)}${
+      accessibilityLabel={`${sender}: ${describe(m)}. ${formatTime(m.sentAt)}${
         m.outgoing ? `, ${STATUS_LABEL[m.status]}` : ''
       }`}
       style={{
@@ -53,6 +79,14 @@ function Bubble({ m, onRetry }: { m: Message; onRetry: (id: string) => void }) {
         gap: 4,
       }}
     >
+      {showSender && !m.outgoing && (
+        <Txt
+          numberOfLines={1}
+          style={{ fontSize: 13, fontWeight: '700', color: t.primary, paddingHorizontal: media && m.kind !== 'voice' ? 8 : 0 }}
+        >
+          {sender}
+        </Txt>
+      )}
       {m.kind === 'image' && <ImageContent m={m} />}
       {m.kind === 'video' && <VideoContent m={m} />}
       {m.kind === 'voice' && <VoiceContent m={m} />}
@@ -124,6 +158,8 @@ export default function Chat() {
 
   const conversation = useHistoryQuery((h) => h.getConversation(id), [id]);
   const messages = useHistoryQuery((h) => h.listMessages(id), [id]);
+  const groupId = conversation?.kind === 'group' ? conversation.peerId : null;
+  const group = useHistoryQuery((h) => (groupId ? h.getGroup(groupId) : Promise.resolve(null)), [groupId]);
 
   useFocusEffect(
     useCallback(() => {
@@ -134,7 +170,7 @@ export default function Chat() {
 
   const send = () => {
     if (!conversation || !text.trim()) return;
-    void service.sendText(conversation.peerId, text);
+    service.sendText(conversation.id, text).catch((err) => Alert.alert('Não foi possível enviar', errorMessage(err)));
     setText('');
   };
 
@@ -148,7 +184,7 @@ export default function Chat() {
       const input = await prepareAsset(asset);
       const caption = text.trim();
       setText('');
-      await service.sendMedia(conversation.peerId, { ...input, ...(caption && { caption }) });
+      await service.sendMedia(conversation.id, { ...input, ...(caption && { caption }) });
     } catch (err) {
       Alert.alert('Não foi possível enviar', errorMessage(err));
     } finally {
@@ -175,20 +211,36 @@ export default function Chat() {
     if (!conversation) return;
     try {
       const input = await voice.stop();
-      if (input) await service.sendMedia(conversation.peerId, input);
+      if (input) await service.sendMedia(conversation.id, input);
     } catch (err) {
       Alert.alert('Não foi possível enviar o áudio', errorMessage(err));
     }
   };
 
-  const keyChanged = conversation && identityAlert?.userId === conversation.peerId;
+  // Troca de chave de segurança do contato ou de alguém do grupo.
+  const keyChangedFor = groupId
+    ? group?.members.find((m) => m.userId === identityAlert?.userId)?.name
+    : identityAlert?.userId === conversation?.peerId
+      ? conversation?.title
+      : undefined;
 
   return (
     <Screen>
-      <Stack.Screen options={{ title: conversation?.title ?? '' }} />
-      {keyChanged && (
+      <Stack.Screen
+        options={{
+          title: conversation?.title ?? '',
+          headerRight: groupId
+            ? () => (
+                <Link href={{ pathname: '/grupo/[id]', params: { id: groupId } }} accessibilityLabel="Dados do grupo">
+                  <Txt style={{ color: t.primary, fontSize: 22 }}>ⓘ</Txt>
+                </Link>
+              )
+            : undefined,
+        }}
+      />
+      {keyChangedFor && (
         <Banner>
-          A chave de segurança de {conversation.title} mudou. Isso acontece quando a pessoa reinstala o app ou troca de
+          A chave de segurança de {keyChangedFor} mudou. Isso acontece quando a pessoa reinstala o app ou troca de
           celular.
         </Banner>
       )}
@@ -202,7 +254,9 @@ export default function Chat() {
           inverted
           data={messages ?? []}
           keyExtractor={(m) => `${m.senderId}:${m.id}`}
-          renderItem={({ item }) => <Bubble m={item} onRetry={(mid) => void service.retry(mid)} />}
+          renderItem={({ item }) => (
+            <Bubble m={item} showSender={!!groupId} onRetry={(mid) => void service.retry(mid)} />
+          )}
           contentContainerStyle={{ padding: spacing.sm }}
           ListFooterComponent={
             <View style={{ padding: spacing.md, alignItems: 'center' }}>
@@ -212,65 +266,80 @@ export default function Chat() {
             </View>
           }
         />
-        <View
-          style={{
-            flexDirection: 'row',
-            alignItems: 'flex-end',
-            gap: spacing.xs,
-            padding: spacing.sm,
-            paddingBottom: Math.max(insets.bottom, spacing.sm),
-            borderTopWidth: 1,
-            borderTopColor: t.border,
-            backgroundColor: t.background,
-          }}
-        >
-          {voice.recording ? (
-            <>
-              <RoundButton label="Descartar áudio" icon="🗑" onPress={() => void voice.cancel()} />
-              <View
-                accessibilityLiveRegion="polite"
-                style={{ flex: 1, height: 44, flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingHorizontal: spacing.sm }}
-              >
-                <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: t.danger }} />
-                <Txt>Gravando {formatDuration(voice.durationMs)}</Txt>
-              </View>
-              <RoundButton label="Enviar áudio" icon="➤" filled onPress={() => void finishVoice()} />
-            </>
-          ) : (
-            <>
-              {preparing ? (
-                <ActivityIndicator style={{ width: 44, height: 44 }} color={t.primary} />
-              ) : (
-                <RoundButton label="Enviar foto ou vídeo" icon="📎" onPress={attach} />
-              )}
-              <TextInput
-                accessibilityLabel="Mensagem"
-                placeholder={preparing ? 'Preparando arquivo…' : 'Mensagem'}
-                placeholderTextColor={t.textMuted}
-                value={text}
-                onChangeText={setText}
-                multiline
-                maxLength={4000}
-                style={{
-                  flex: 1,
-                  maxHeight: 140,
-                  color: t.text,
-                  backgroundColor: t.surface,
-                  borderRadius: 20,
-                  paddingHorizontal: 16,
-                  paddingTop: 10,
-                  paddingBottom: 10,
-                  fontSize: 16,
-                }}
-              />
-              {text.trim() ? (
-                <RoundButton label="Enviar" icon="➤" filled onPress={send} />
-              ) : (
-                <RoundButton label="Gravar mensagem de voz" icon="🎤" filled onPress={() => void startVoice()} />
-              )}
-            </>
-          )}
-        </View>
+        {conversation && !conversation.active ? (
+          <View
+            style={{
+              padding: spacing.md,
+              paddingBottom: Math.max(insets.bottom, spacing.md),
+              borderTopWidth: 1,
+              borderTopColor: t.border,
+            }}
+          >
+            <Txt muted style={{ textAlign: 'center' }}>
+              Você não faz mais parte deste grupo.
+            </Txt>
+          </View>
+        ) : (
+          <View
+            style={{
+              flexDirection: 'row',
+              alignItems: 'flex-end',
+              gap: spacing.xs,
+              padding: spacing.sm,
+              paddingBottom: Math.max(insets.bottom, spacing.sm),
+              borderTopWidth: 1,
+              borderTopColor: t.border,
+              backgroundColor: t.background,
+            }}
+          >
+            {voice.recording ? (
+              <>
+                <RoundButton label="Descartar áudio" icon="🗑" onPress={() => void voice.cancel()} />
+                <View
+                  accessibilityLiveRegion="polite"
+                  style={{ flex: 1, height: 44, flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingHorizontal: spacing.sm }}
+                >
+                  <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: t.danger }} />
+                  <Txt>Gravando {formatDuration(voice.durationMs)}</Txt>
+                </View>
+                <RoundButton label="Enviar áudio" icon="➤" filled onPress={() => void finishVoice()} />
+              </>
+            ) : (
+              <>
+                {preparing ? (
+                  <ActivityIndicator style={{ width: 44, height: 44 }} color={t.primary} />
+                ) : (
+                  <RoundButton label="Enviar foto ou vídeo" icon="📎" onPress={attach} />
+                )}
+                <TextInput
+                  accessibilityLabel="Mensagem"
+                  placeholder={preparing ? 'Preparando arquivo…' : 'Mensagem'}
+                  placeholderTextColor={t.textMuted}
+                  value={text}
+                  onChangeText={setText}
+                  multiline
+                  maxLength={4000}
+                  style={{
+                    flex: 1,
+                    maxHeight: 140,
+                    color: t.text,
+                    backgroundColor: t.surface,
+                    borderRadius: 20,
+                    paddingHorizontal: 16,
+                    paddingTop: 10,
+                    paddingBottom: 10,
+                    fontSize: 16,
+                  }}
+                />
+                {text.trim() ? (
+                  <RoundButton label="Enviar" icon="➤" filled onPress={send} />
+                ) : (
+                  <RoundButton label="Gravar mensagem de voz" icon="🎤" filled onPress={() => void startVoice()} />
+                )}
+              </>
+            )}
+          </View>
+        )}
       </KeyboardAvoidingView>
     </Screen>
   );

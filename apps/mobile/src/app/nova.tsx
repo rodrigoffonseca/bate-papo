@@ -29,6 +29,7 @@ export default function Nova() {
   return (
     <Screen>
       <View style={{ padding: spacing.lg, gap: spacing.lg }}>
+        <Button variant="ghost" title="👥 Novo grupo" onPress={() => router.replace('/novo-grupo')} />
         <Txt muted>Digite o nome de usuário da pessoa com quem você quer conversar.</Txt>
         <Field
           label="Nome de usuário"

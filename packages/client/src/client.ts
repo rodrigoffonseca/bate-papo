@@ -52,6 +52,8 @@ interface Events {
   decryptionError: { envelopeId: string; from: string; error: unknown };
   connection: 'connected' | 'disconnected';
   accountAlert: AccountAlert;
+  /** Um grupo de que você faz (ou fazia) parte mudou: busque o estado atual com getGroup(). */
+  groupChanged: { groupId: string };
 }
 
 type Listener<T> = (e: T) => void;
@@ -316,6 +318,24 @@ export class BatePapoClient {
     return this.api.listGroups();
   }
 
+  /** Estado atual do grupo, ou null se você não é (mais) membro dele. */
+  async getGroup(groupId: string): Promise<Group | null> {
+    try {
+      return await this.api.getGroup(groupId);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 404) return null;
+      throw err;
+    }
+  }
+
+  renameGroup(groupId: string, name: string) {
+    return this.api.renameGroup(groupId, name);
+  }
+
+  setGroupRole(groupId: string, userId: string, role: 'admin' | 'member') {
+    return this.api.setGroupRole(groupId, userId, role);
+  }
+
   addGroupMembers(groupId: string, userIds: string[]) {
     return this.api.addGroupMembers(groupId, userIds);
   }
@@ -519,6 +539,9 @@ export class BatePapoClient {
         }
         if (err.status === 409 && groupId && Array.isArray(err.body.members)) {
           members = err.body.members as string[];
+          // A lista de membros mudou sem o app saber: avisa, para que a
+          // mudança apareça na conversa antes de ele confiar nela de novo.
+          this.emit('groupChanged', { groupId });
           continue;
         }
         throw err;
@@ -595,6 +618,8 @@ export class BatePapoClient {
         this.reconnectDelay = 1000;
         this.emit('connection', 'connected');
         this.sync().catch(() => ws.close());
+      } else if (msg.type === 'group' && typeof msg.group_id === 'string') {
+        this.emit('groupChanged', { groupId: msg.group_id });
       } else if (msg.type === 'alert') {
         this.emit('accountAlert', msg.alert as AccountAlert);
       } else if (msg.type === 'envelope') {
