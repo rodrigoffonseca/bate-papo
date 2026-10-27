@@ -5,6 +5,29 @@ import type { Sql } from './sql';
 
 export type MessageStatus = 'sending' | 'sent' | 'failed' | 'received';
 
+/**
+ * Estado do arquivo de um anexo neste aparelho:
+ * - ready: guardado (cifrado) no aparelho;
+ * - remote: só no servidor (ainda não baixado);
+ * - downloading: baixando;
+ * - expired: o servidor já apagou e ele nunca foi baixado;
+ * - error: falhou ao baixar (dá para tentar de novo).
+ */
+export type MediaState = 'ready' | 'remote' | 'downloading' | 'expired' | 'error';
+
+/** Ponteiro do anexo guardado com a mensagem. id vazio = ainda não enviado ao servidor. */
+export interface StoredAttachment {
+  id: string;
+  key: string;
+  digest: string;
+  mime: string;
+  size: number;
+  width?: number;
+  height?: number;
+  durationMs?: number;
+  thumbnail?: string;
+}
+
 export interface Contact {
   id: string;
   username: string | null;
@@ -30,6 +53,8 @@ export interface Message {
   sentAt: number;
   status: MessageStatus;
   outgoing: boolean;
+  attachment?: StoredAttachment;
+  mediaState?: MediaState;
 }
 
 export function directConversationId(userId: string): string {
@@ -44,9 +69,24 @@ export function contactTitle(c: Pick<Contact, 'username' | 'displayName'> | null
 
 function preview(kind: string, text: string | null): string {
   if (kind === 'image') return text ? `📷 ${text}` : '📷 Foto';
+  if (kind === 'video') return text ? `🎬 ${text}` : '🎬 Vídeo';
   if (kind === 'voice') return '🎤 Mensagem de voz';
   return text ?? '';
 }
+
+interface MessageRow {
+  conversation_id: string;
+  sender_id: string;
+  id: string;
+  kind: string;
+  text: string | null;
+  sent_at: number;
+  status: MessageStatus;
+  attachment: string | null;
+  media_state: MediaState | null;
+}
+
+const MESSAGE_COLS = 'conversation_id, sender_id, id, kind, text, sent_at, status, attachment, media_state';
 
 export class History {
   private readonly listeners = new Set<() => void>();
@@ -120,38 +160,91 @@ export class History {
 
   /** Guarda uma mensagem recebida. Repetições (mesmo remetente e ID) são ignoradas. */
   async saveIncoming(
-    m: { from: string; id: string; kind: string; text?: string; sentAt: number },
+    m: { from: string; id: string; kind: string; text?: string; sentAt: number; attachment?: StoredAttachment },
     opts: { read: boolean },
   ): Promise<boolean> {
     const exists = await this.db.first('SELECT 1 FROM messages WHERE sender_id = ? AND id = ?', m.from, m.id);
     if (exists) return false;
     const conversationId = await this.touchConversation(m.from, m.kind, m.text ?? null, m.sentAt, opts.read ? 0 : 1);
     await this.db.run(
-      `INSERT INTO messages (conversation_id, sender_id, id, kind, text, sent_at, status)
-       VALUES (?, ?, ?, ?, ?, ?, 'received')`,
+      `INSERT INTO messages (conversation_id, sender_id, id, kind, text, sent_at, status, attachment, media_state)
+       VALUES (?, ?, ?, ?, ?, ?, 'received', ?, ?)`,
       conversationId,
       m.from,
       m.id,
       m.kind,
       m.text ?? null,
       m.sentAt,
+      m.attachment ? JSON.stringify(m.attachment) : null,
+      m.attachment ? 'remote' : null,
     );
     this.changed();
     return true;
   }
 
-  async saveOutgoing(m: { to: string; id: string; text: string; sentAt: number }): Promise<void> {
-    const conversationId = await this.touchConversation(m.to, 'text', m.text, m.sentAt, 0);
+  async saveOutgoing(m: {
+    to: string;
+    id: string;
+    kind?: string;
+    text: string | null;
+    sentAt: number;
+    attachment?: StoredAttachment;
+  }): Promise<void> {
+    const kind = m.kind ?? 'text';
+    const conversationId = await this.touchConversation(m.to, kind, m.text, m.sentAt, 0);
     await this.db.run(
-      `INSERT INTO messages (conversation_id, sender_id, id, kind, text, sent_at, status)
-       VALUES (?, ?, ?, 'text', ?, ?, 'sending')`,
+      `INSERT INTO messages (conversation_id, sender_id, id, kind, text, sent_at, status, attachment, media_state)
+       VALUES (?, ?, ?, ?, ?, ?, 'sending', ?, ?)`,
       conversationId,
       this.myId(),
       m.id,
+      kind,
       m.text,
       m.sentAt,
+      m.attachment ? JSON.stringify(m.attachment) : null,
+      m.attachment ? 'ready' : null,
     );
     this.changed();
+  }
+
+  /** Atualiza o anexo e/ou o estado da mídia de uma mensagem. */
+  async setMedia(
+    senderId: string,
+    id: string,
+    patch: { attachment?: StoredAttachment; mediaState?: MediaState },
+  ): Promise<void> {
+    if (patch.attachment) {
+      await this.db.run(
+        'UPDATE messages SET attachment = ? WHERE sender_id = ? AND id = ?',
+        JSON.stringify(patch.attachment),
+        senderId,
+        id,
+      );
+    }
+    if (patch.mediaState) {
+      await this.db.run('UPDATE messages SET media_state = ? WHERE sender_id = ? AND id = ?', patch.mediaState, senderId, id);
+    }
+    this.changed();
+  }
+
+  async getMessage(senderId: string, id: string): Promise<Message | null> {
+    const r = await this.db.first<MessageRow>(`SELECT ${MESSAGE_COLS} FROM messages WHERE sender_id = ? AND id = ?`, senderId, id);
+    return r && this.toMessage(r);
+  }
+
+  private toMessage(r: MessageRow): Message {
+    return {
+      conversationId: r.conversation_id,
+      senderId: r.sender_id,
+      id: r.id,
+      kind: r.kind,
+      text: r.text,
+      sentAt: r.sent_at,
+      status: r.status,
+      outgoing: r.sender_id === this.myId(),
+      ...(r.attachment && { attachment: JSON.parse(r.attachment) as StoredAttachment }),
+      ...(r.media_state && { mediaState: r.media_state }),
+    };
   }
 
   async setOutgoingStatus(id: string, status: 'sent' | 'failed' | 'sending'): Promise<void> {
@@ -159,14 +252,14 @@ export class History {
     this.changed();
   }
 
-  async getOutgoing(id: string): Promise<{ to: string; text: string } | null> {
-    const r = await this.db.first<{ peer_id: string; text: string }>(
-      `SELECT c.peer_id, m.text FROM messages m JOIN conversations c ON c.id = m.conversation_id
+  async getOutgoing(id: string): Promise<{ to: string; text: string | null; kind: string } | null> {
+    const r = await this.db.first<{ peer_id: string; text: string | null; kind: string }>(
+      `SELECT c.peer_id, m.text, m.kind FROM messages m JOIN conversations c ON c.id = m.conversation_id
         WHERE m.sender_id = ? AND m.id = ?`,
       this.myId(),
       id,
     );
-    return r && { to: r.peer_id, text: r.text };
+    return r && { to: r.peer_id, text: r.text, kind: r.kind };
   }
 
   async listConversations(): Promise<Conversation[]> {
@@ -201,31 +294,13 @@ export class History {
 
   /** Mensagens da conversa, da mais recente para a mais antiga. */
   async listMessages(conversationId: string, limit = 200): Promise<Message[]> {
-    const rows = await this.db.all<{
-      conversation_id: string;
-      sender_id: string;
-      id: string;
-      kind: string;
-      text: string | null;
-      sent_at: number;
-      status: MessageStatus;
-    }>(
-      `SELECT conversation_id, sender_id, id, kind, text, sent_at, status FROM messages
+    const rows = await this.db.all<MessageRow>(
+      `SELECT ${MESSAGE_COLS} FROM messages
         WHERE conversation_id = ? ORDER BY sent_at DESC, rowid DESC LIMIT ?`,
       conversationId,
       limit,
     );
-    const me = this.myId();
-    return rows.map((r) => ({
-      conversationId: r.conversation_id,
-      senderId: r.sender_id,
-      id: r.id,
-      kind: r.kind,
-      text: r.text,
-      sentAt: r.sent_at,
-      status: r.status,
-      outgoing: r.sender_id === me,
-    }));
+    return rows.map((r) => this.toMessage(r));
   }
 
   async markRead(conversationId: string): Promise<void> {

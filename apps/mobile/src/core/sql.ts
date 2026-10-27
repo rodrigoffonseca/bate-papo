@@ -45,6 +45,12 @@ const MIGRATIONS = [
   );
   CREATE INDEX messages_conversation_idx ON messages (conversation_id, sent_at);
   `,
+  // Fotos, vídeos e áudios: o ponteiro do anexo (com a chave) fica aqui, no
+  // banco cifrado; o arquivo fica no aparelho, ainda cifrado.
+  `
+  ALTER TABLE messages ADD COLUMN attachment TEXT;
+  ALTER TABLE messages ADD COLUMN media_state TEXT;
+  `,
 ];
 
 /** Aplica as migrações pendentes, controladas por PRAGMA user_version. */

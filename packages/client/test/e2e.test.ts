@@ -12,8 +12,11 @@ import { fileURLToPath } from 'node:url';
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
+import { encryptAttachment } from '@bate-papo/crypto';
+
 import {
   type AccountAlert,
+  AttachmentExpiredError,
   BatePapoClient,
   KeyValueStorage,
   type ReceivedMessage,
@@ -245,5 +248,44 @@ describe.skipIf(!dbUrl)('ponta a ponta com o servidor', () => {
     expect(user.id).toBe(ana.user.id);
     expect(await newPhone.pinEnabled()).toBe(false); // código usado: precisa de novo PIN
     expect(await newPhone.setPin('outro pin 2026')).not.toBe(recovery);
+  });
+
+  it('vídeo com miniatura, envio em etapas e anexo expirado', async () => {
+    const ana = await newUser('anavid');
+    const bob = await newUser('bobvid');
+
+    const video = new Uint8Array(300_000).map((_, i) => (i * 11) % 256);
+    await ana.client.sendVideo({ userId: bob.user.id }, video, {
+      mime: 'video/mp4',
+      width: 1280,
+      height: 720,
+      durationMs: 12_500,
+      thumbnail: 'miniatura-base64',
+      caption: 'olha isso',
+    });
+
+    // Em etapas: cifra, guarda (no app), envia o arquivo e depois a mensagem.
+    const photo = new Uint8Array(50_000).map((_, i) => i % 199);
+    const enc = encryptAttachment(photo);
+    const pointer = await ana.client.uploadAttachment(enc, { mime: 'image/jpeg', size: photo.length, width: 10, height: 10 });
+    await ana.client.sendAttachment({ userId: bob.user.id }, 'image', pointer, { id: 'id-escolhido-pelo-app' });
+
+    await bob.client.sync();
+    const vid = bob.inbox.find((m) => m.kind === 'video')!;
+    expect(vid).toMatchObject({ text: 'olha isso', attachment: { durationMs: 12_500, thumbnail: 'miniatura-base64' } });
+    expect(await bob.client.downloadAttachment(vid.attachment!)).toEqual(video);
+
+    const img = bob.inbox.find((m) => m.kind === 'image')!;
+    expect(img.id).toBe('id-escolhido-pelo-app');
+    // Baixar cifrado devolve exatamente o que o remetente cifrou.
+    expect(await bob.client.downloadEncryptedAttachment(img.attachment!)).toEqual(enc.ciphertext);
+
+    // Anexo que o servidor não tem mais.
+    const gone = { ...img.attachment!, id: '00000000-0000-0000-0000-000000000000' };
+    await expect(bob.client.downloadEncryptedAttachment(gone)).rejects.toBeInstanceOf(AttachmentExpiredError);
+    // Resumo que não confere (arquivo trocado no servidor).
+    await expect(bob.client.downloadAttachment({ ...img.attachment!, digest: vid.attachment!.digest })).rejects.toThrow(
+      /adulterado/,
+    );
   });
 });

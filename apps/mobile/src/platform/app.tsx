@@ -9,6 +9,7 @@ import { type AppState, AppService } from '@/core/service';
 
 import { SERVER_URL } from './config';
 import { openEncryptedDatabase } from './db';
+import { deviceMediaStore } from './media';
 
 const ServiceContext = createContext<AppService | null>(null);
 
@@ -23,6 +24,7 @@ function startService(): Promise<AppService> {
   servicePromise ??= (async () => {
     const service = new AppService({
       db: await openEncryptedDatabase(),
+      media: deviceMediaStore,
       serverUrl: SERVER_URL,
       fetch: expoFetchLike,
     });

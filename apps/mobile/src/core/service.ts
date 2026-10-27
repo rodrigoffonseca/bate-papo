@@ -2,9 +2,12 @@
 // observam este serviço. Assim ele pode ser testado no Node contra o
 // servidor de verdade.
 
+import { decryptAttachment, encryptAttachment, fromBase64, toBase64 } from '@bate-papo/crypto';
 import {
   type AccountAlert,
   ApiError,
+  AttachmentExpiredError,
+  type MediaKind,
   BatePapoClient,
   type FetchLike,
   KeyValueStorage,
@@ -13,7 +16,8 @@ import {
   newMessageId,
 } from '@bate-papo/client';
 
-import { type Contact, History, directConversationId } from './history';
+import { type Contact, History, type Message, type StoredAttachment, directConversationId } from './history';
+import { type MediaStore, extensionFor, mediaKey } from './media';
 import { SqlKV } from './kv';
 import { type Sql, migrate } from './sql';
 
@@ -41,10 +45,41 @@ export interface AppState {
 
 export interface ServiceDeps {
   db: Sql;
+  /** Onde ficam os arquivos de mídia (cifrados). */
+  media: MediaStore;
   serverUrl: string;
   fetch?: FetchLike;
   /** Relógio (substituível nos testes). */
   now?: () => number;
+}
+
+/** Limites de tamanho por tipo, antes de cifrar (o servidor aceita até 64 MiB). */
+export const MEDIA_LIMITS: Record<MediaKind, number> = {
+  image: 25 * 1024 * 1024,
+  video: 60 * 1024 * 1024,
+  voice: 16 * 1024 * 1024,
+};
+/** Fotos e áudios até este tamanho são baixados assim que chegam; vídeos, só com um toque. */
+const AUTO_DOWNLOAD_BYTES = 8 * 1024 * 1024;
+
+export class MediaTooLargeError extends Error {
+  constructor(readonly kind: MediaKind, readonly limit: number) {
+    super(`arquivo grande demais (máximo ${Math.round(limit / 1024 / 1024)} MB)`);
+    this.name = 'MediaTooLargeError';
+  }
+}
+
+/** Foto, vídeo ou áudio escolhido ou gravado pela pessoa, já lido do arquivo. */
+export interface MediaInput {
+  kind: MediaKind;
+  bytes: Uint8Array;
+  mime: string;
+  width?: number;
+  height?: number;
+  durationMs?: number;
+  /** Miniatura JPEG pequena em base64 (fotos e vídeos). */
+  thumbnail?: string;
+  caption?: string;
 }
 
 const ME_KEY = 'app:me';
@@ -100,6 +135,8 @@ export class AppService {
 
   async init(): Promise<void> {
     await migrate(this.deps.db);
+    // Arquivos decifrados que sobraram de uma execução anterior.
+    await this.deps.media.clearTemp().catch(() => undefined);
     this.kv = new SqlKV(this.deps.db);
     this.storage = new KeyValueStorage(this.kv);
     this.newClient();
@@ -280,6 +317,7 @@ export class AppService {
     this.client.disconnect();
     await this.storage.clear();
     await this.history.clear();
+    await this.deps.media.clear();
     this.newClient();
     this.set({ ...INITIAL, phase: 'signed-out', signedOutReason: reason });
   }
@@ -307,12 +345,115 @@ export class AppService {
     await this.deliver(peerId, id, body);
   }
 
-  /** Tenta reenviar uma mensagem que falhou. */
+  /** Tenta reenviar uma mensagem que falhou (texto ou mídia). */
   async retry(id: string): Promise<void> {
     const m = await this.history.getOutgoing(id);
     if (!m) return;
     await this.history.setOutgoingStatus(id, 'sending');
-    await this.deliver(m.to, id, m.text);
+    if (m.kind === 'text') await this.deliver(m.to, id, m.text ?? '');
+    else await this.deliverMedia(m.to, id);
+  }
+
+  // ---- fotos, vídeos e áudios ----
+
+  /**
+   * Envia uma foto, vídeo ou áudio. O arquivo é cifrado e guardado no
+   * aparelho antes de qualquer envio, então a mensagem aparece na hora e pode
+   * ser reenviada se a rede falhar.
+   */
+  async sendMedia(peerId: string, input: MediaInput): Promise<void> {
+    if (input.bytes.length > MEDIA_LIMITS[input.kind]) throw new MediaTooLargeError(input.kind, MEDIA_LIMITS[input.kind]);
+    const me = this.state.me!.id;
+    const id = newMessageId();
+    const enc = encryptAttachment(input.bytes);
+    await this.deps.media.save(mediaKey(me, id), enc.ciphertext);
+    const attachment: StoredAttachment = {
+      id: '', // preenchido depois do envio ao servidor
+      key: toBase64(enc.key),
+      digest: toBase64(enc.digest),
+      mime: input.mime,
+      size: input.bytes.length,
+      ...(input.width !== undefined && { width: input.width }),
+      ...(input.height !== undefined && { height: input.height }),
+      ...(input.durationMs !== undefined && { durationMs: input.durationMs }),
+      ...(input.thumbnail && { thumbnail: input.thumbnail }),
+    };
+    const caption = input.caption?.trim() || null;
+    await this.history.saveOutgoing({ to: peerId, id, kind: input.kind, text: caption, sentAt: this.now(), attachment });
+    await this.deliverMedia(peerId, id);
+  }
+
+  private async deliverMedia(peerId: string, id: string): Promise<void> {
+    const me = this.state.me!.id;
+    try {
+      const m = await this.history.getMessage(me, id);
+      if (!m?.attachment) throw new Error('mensagem sem anexo');
+      let pointer = m.attachment;
+      if (!pointer.id) {
+        // Ainda não foi para o servidor: envia a cópia cifrada guardada.
+        const ciphertext = await this.deps.media.read(mediaKey(me, id));
+        if (!ciphertext) throw new Error('arquivo não encontrado no aparelho');
+        const { id: _empty, key, digest, ...meta } = pointer;
+        void _empty;
+        const uploaded = await this.client.uploadAttachment(
+          { ciphertext, key: fromBase64(key), digest: fromBase64(digest) },
+          meta,
+        );
+        pointer = { ...pointer, id: uploaded.id };
+        await this.history.setMedia(me, id, { attachment: pointer });
+      }
+      await this.client.sendAttachment({ userId: peerId }, m.kind as MediaKind, pointer, {
+        id,
+        caption: m.text ?? undefined,
+      });
+      await this.history.setOutgoingStatus(id, 'sent');
+    } catch {
+      await this.history.setOutgoingStatus(id, 'failed');
+    }
+  }
+
+  /** Baixa (cifrado) o anexo de uma mensagem recebida e o guarda no aparelho. */
+  async downloadMedia(senderId: string, id: string): Promise<void> {
+    const m = await this.history.getMessage(senderId, id);
+    if (!m?.attachment || m.mediaState === 'ready' || m.mediaState === 'downloading') return;
+    await this.history.setMedia(senderId, id, { mediaState: 'downloading' });
+    try {
+      const ciphertext = await this.client.downloadEncryptedAttachment(m.attachment);
+      await this.deps.media.save(mediaKey(senderId, id), ciphertext);
+      await this.history.setMedia(senderId, id, { mediaState: 'ready' });
+    } catch (err) {
+      await this.history.setMedia(senderId, id, {
+        mediaState: err instanceof AttachmentExpiredError ? 'expired' : 'error',
+      });
+    }
+  }
+
+  /** Decifra o anexo guardado no aparelho (baixando antes, se preciso). */
+  async readMedia(m: Pick<Message, 'senderId' | 'id'>): Promise<Uint8Array> {
+    let msg = await this.history.getMessage(m.senderId, m.id);
+    if (!msg?.attachment) throw new Error('mensagem sem anexo');
+    if (msg.mediaState !== 'ready') {
+      await this.downloadMedia(m.senderId, m.id);
+      msg = await this.history.getMessage(m.senderId, m.id);
+      if (msg?.mediaState === 'expired') throw new AttachmentExpiredError();
+      if (msg?.mediaState !== 'ready') throw new Error('não foi possível baixar o arquivo');
+    }
+    const ciphertext = await this.deps.media.read(mediaKey(m.senderId, m.id));
+    if (!ciphertext) throw new Error('arquivo não encontrado no aparelho');
+    return decryptAttachment(ciphertext, fromBase64(msg!.attachment!.key), fromBase64(msg!.attachment!.digest));
+  }
+
+  /**
+   * Prepara um arquivo temporário decifrado para o player de vídeo ou áudio.
+   * Chame releaseMediaFile(uri) ao sair da tela.
+   */
+  async openMediaFile(m: Pick<Message, 'senderId' | 'id'> & { attachment?: StoredAttachment }): Promise<string> {
+    const bytes = await this.readMedia(m);
+    return this.deps.media.writeTemp(bytes, extensionFor(m.attachment?.mime ?? ''));
+  }
+
+  releaseMediaFile(uri: string): Promise<void> {
+    return this.deps.media.deleteTemp(uri);
   }
 
   private async deliver(peerId: string, id: string, text: string): Promise<void> {
@@ -325,8 +466,7 @@ export class AppService {
   }
 
   private async onMessage(m: ReceivedMessage): Promise<void> {
-    // Fatia 1: apenas conversas 1:1 de texto. Grupos, fotos e áudios chegam
-    // nas próximas fatias.
+    // Grupos ainda não aparecem no app (próxima fatia).
     if (m.groupId) return;
     if (!(await this.history.getContact(m.from))) {
       try {
@@ -336,10 +476,14 @@ export class AppService {
       }
     }
     const sentAt = Math.min(m.sentAt, this.now() + MAX_CLOCK_SKEW_MS);
-    await this.history.saveIncoming(
-      { from: m.from, id: m.id, kind: m.kind, text: m.text, sentAt },
+    const isNew = await this.history.saveIncoming(
+      { from: m.from, id: m.id, kind: m.kind, text: m.text, sentAt, attachment: m.attachment },
       { read: this.activeConversation === directConversationId(m.from) },
     );
+    // Fotos e áudios pequenos chegam já baixados; vídeos esperam um toque.
+    if (isNew && m.attachment && m.kind !== 'video' && m.attachment.size <= AUTO_DOWNLOAD_BYTES) {
+      void this.downloadMedia(m.from, m.id);
+    }
   }
 
   /** Número de segurança da conversa com um contato. */

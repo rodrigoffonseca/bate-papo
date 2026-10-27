@@ -102,5 +102,5 @@ Ao receber `ready`, o cliente busca o que estiver pendente com `GET /messages` (
 
 | Método | Rota | Corpo | Resposta |
 | --- | --- | --- | --- |
-| POST | `/attachments` | bytes cifrados (`application/octet-stream`) | `201 {id, size}` · `413` acima do limite (25 MiB) |
+| POST | `/attachments` | bytes cifrados (`application/octet-stream`) | `201 {id, size}` · `413` acima do limite (64 MiB, configurável) |
 | GET | `/attachments/{id}` | — | bytes cifrados · `404` se expirado |

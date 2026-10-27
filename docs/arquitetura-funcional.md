@@ -85,7 +85,8 @@ flowchart LR
 | | Notificações push "acorde e sincronize" | servidor + gateway push | 🚧 |
 | | Métricas, painéis e alertas | servidor + stack de observabilidade | 🚧 |
 | Clientes | App Android/iOS (React Native): cadastro, perfil, conversas de texto | `apps/mobile` | ✅ (fatia 1) |
-| | App: fotos, áudio, grupos, número de segurança | `apps/mobile` | 🚧 |
+| | App: fotos, vídeos e mensagens de voz | `apps/mobile` | ✅ |
+| | App: grupos, número de segurança | `apps/mobile` | 🚧 |
 
 ---
 
@@ -155,7 +156,7 @@ Um único binário Go, sem estado local além dos anexos em disco, com os módul
 | Chaves | `/v1/keys*` | `identity_keys`, `one_time_prekeys` | Consumo atômico de *one-time prekey*; limite de 600 buscas/h por usuário |
 | Mensagens | `/v1/messages*`, `/v1/ws` | `envelopes` | Checagem de `registration_id` (410), confirmação apaga |
 | Grupos | `/v1/groups*` | `groups`, `group_members` | Até 256 membros; destinatários = membros exatos (409) |
-| Anexos | `/v1/attachments*` | `attachments` + disco | Até 25 MiB, bytes opacos |
+| Anexos | `/v1/attachments*` | `attachments` + disco | Até 64 MiB, bytes opacos |
 | Hub WebSocket | — | — | Em memória: entrega só a conexões da mesma instância |
 | Janitor | — | todas com validade | A cada hora: envelopes e anexos vencidos, desafios expirados |
 

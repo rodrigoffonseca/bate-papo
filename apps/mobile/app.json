@@ -39,6 +39,21 @@
         {
           "useSQLCipher": true
         }
+      ],
+      "expo-video",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "O Bate-Papo usa suas fotos e vídeos apenas para enviar o que você escolher, com criptografia de ponta a ponta.",
+          "cameraPermission": "O Bate-Papo usa a câmera para você tirar fotos e gravar vídeos para enviar.",
+          "microphonePermission": "O Bate-Papo usa o microfone para gravar o áudio dos vídeos que você enviar."
+        }
+      ],
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "O Bate-Papo usa o microfone para gravar mensagens de voz, enviadas com criptografia de ponta a ponta."
+        }
       ]
     ],
     "experiments": {
