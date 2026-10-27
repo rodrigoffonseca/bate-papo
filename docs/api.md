@@ -28,6 +28,8 @@ Se a conta tem PIN e está em uso, `verify` responde `423 {code: "registration_l
 | GET | `/account/alerts` | — | `{alerts: [{id, kind, created_at}]}` |
 | POST | `/account/alerts/ack` | `{ids}` | `204` |
 
+Se o serviço de chaves do PIN (OpenBao) estiver fora do ar, as rotas que criam ou conferem PIN respondem `503 {code: "temporarily_unavailable"}`; isso nunca conta como PIN errado.
+
 Detalhes e regras em [seguranca-da-conta.md](seguranca-da-conta.md).
 
 Telefones aceitos: E.164 (`+55 11 98765-4321`) ou nacional com DDD (`11987654321`, assume +55).

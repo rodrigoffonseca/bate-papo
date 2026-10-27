@@ -18,17 +18,16 @@ func TestValidatePin(t *testing.T) {
 	}
 }
 
-func TestPinHash(t *testing.T) {
-	h, salt, err := newPinHash("284917")
-	if err != nil {
-		t.Fatal(err)
+func TestArgon2idIsSaltedAndDeterministic(t *testing.T) {
+	salt1, salt2 := []byte("sal-1-com-16-byt"), []byte("sal-2-com-16-byt")
+	if string(hashPin("284917", salt1)) != string(hashPin("284917", salt1)) {
+		t.Fatal("o mesmo PIN e sal devem dar o mesmo resultado")
 	}
-	if !pinMatches("284917", salt, h) || pinMatches("284918", salt, h) {
-		t.Fatal("verificação do PIN incorreta")
-	}
-	h2, salt2, _ := newPinHash("284917")
-	if string(h) == string(h2) || string(salt) == string(salt2) {
+	if string(hashPin("284917", salt1)) == string(hashPin("284917", salt2)) {
 		t.Fatal("o sal deveria tornar cada hash único")
+	}
+	if string(hashPin("284917", salt1)) == string(hashPin("284918", salt1)) {
+		t.Fatal("PINs diferentes devem dar resultados diferentes")
 	}
 }
 

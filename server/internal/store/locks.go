@@ -13,6 +13,7 @@ import (
 type RegistrationLock struct {
 	PinHash        []byte
 	PinSalt        []byte
+	PinScheme      string
 	RecoveryHash   []byte
 	FailedAttempts int
 	CreatedAt      time.Time
@@ -31,11 +32,11 @@ func (s *Store) LockStateByPhone(ctx context.Context, phoneHash []byte) (*LockSt
 	var l RegistrationLock
 	var pinHash []byte
 	err := s.pool.QueryRow(ctx, `
-		SELECT u.id, u.last_seen_at, l.pin_hash, l.pin_salt, l.recovery_hash,
+		SELECT u.id, u.last_seen_at, l.pin_hash, l.pin_salt, COALESCE(l.pin_scheme, ''), l.recovery_hash,
 		       COALESCE(l.failed_attempts, 0), COALESCE(l.created_at, now())
 		  FROM users u LEFT JOIN registration_locks l ON l.user_id = u.id
 		 WHERE u.phone_hash = $1`, phoneHash).
-		Scan(&st.UserID, &st.LastSeen, &pinHash, &l.PinSalt, &l.RecoveryHash, &l.FailedAttempts, &l.CreatedAt)
+		Scan(&st.UserID, &st.LastSeen, &pinHash, &l.PinSalt, &l.PinScheme, &l.RecoveryHash, &l.FailedAttempts, &l.CreatedAt)
 	if err != nil {
 		return nil, notFound(err)
 	}
@@ -49,9 +50,9 @@ func (s *Store) LockStateByPhone(ctx context.Context, phoneHash []byte) (*LockSt
 func (s *Store) GetRegistrationLock(ctx context.Context, userID uuid.UUID) (*RegistrationLock, error) {
 	var l RegistrationLock
 	err := s.pool.QueryRow(ctx, `
-		SELECT pin_hash, pin_salt, recovery_hash, failed_attempts, created_at
+		SELECT pin_hash, pin_salt, pin_scheme, recovery_hash, failed_attempts, created_at
 		  FROM registration_locks WHERE user_id = $1`, userID).
-		Scan(&l.PinHash, &l.PinSalt, &l.RecoveryHash, &l.FailedAttempts, &l.CreatedAt)
+		Scan(&l.PinHash, &l.PinSalt, &l.PinScheme, &l.RecoveryHash, &l.FailedAttempts, &l.CreatedAt)
 	if err != nil {
 		return nil, notFound(err)
 	}
@@ -60,14 +61,24 @@ func (s *Store) GetRegistrationLock(ctx context.Context, userID uuid.UUID) (*Reg
 
 // SetRegistrationLock define (ou troca) o PIN e o código de recuperação,
 // zerando as tentativas erradas.
-func (s *Store) SetRegistrationLock(ctx context.Context, userID uuid.UUID, pinHash, pinSalt, recoveryHash []byte) error {
+func (s *Store) SetRegistrationLock(ctx context.Context, userID uuid.UUID, pinHash, pinSalt []byte, pinScheme string, recoveryHash []byte) error {
 	_, err := s.pool.Exec(ctx, `
-		INSERT INTO registration_locks (user_id, pin_hash, pin_salt, recovery_hash)
-		VALUES ($1, $2, $3, $4)
+		INSERT INTO registration_locks (user_id, pin_hash, pin_salt, pin_scheme, recovery_hash)
+		VALUES ($1, $2, $3, $4, $5)
 		ON CONFLICT (user_id) DO UPDATE SET
-		    pin_hash = EXCLUDED.pin_hash, pin_salt = EXCLUDED.pin_salt,
+		    pin_hash = EXCLUDED.pin_hash, pin_salt = EXCLUDED.pin_salt, pin_scheme = EXCLUDED.pin_scheme,
 		    recovery_hash = EXCLUDED.recovery_hash, failed_attempts = 0, updated_at = now()`,
-		userID, pinHash, pinSalt, recoveryHash)
+		userID, pinHash, pinSalt, pinScheme, recoveryHash)
+	return err
+}
+
+// UpgradePinHash troca o hash do PIN por um calculado com outro esquema (ex.:
+// incluir a chave secreta), sem mexer em tentativas nem no código de
+// recuperação. Só atualiza se o esquema atual ainda for oldScheme.
+func (s *Store) UpgradePinHash(ctx context.Context, userID uuid.UUID, oldScheme string, pinHash []byte, pinScheme string) error {
+	_, err := s.pool.Exec(ctx, `
+		UPDATE registration_locks SET pin_hash = $3, pin_scheme = $4
+		 WHERE user_id = $1 AND pin_scheme = $2`, userID, oldScheme, pinHash, pinScheme)
 	return err
 }
 

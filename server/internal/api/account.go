@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/rodrigoffonseca/bate-papo/server/internal/pepper"
 	"github.com/rodrigoffonseca/bate-papo/server/internal/store"
 )
 
@@ -130,7 +131,13 @@ func (s *Server) handleUnlock(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	if !pinMatches(req.Pin, lock.PinSalt, lock.PinHash) {
+	ok, err := s.pinMatches(r.Context(), userID, req.Pin, lock)
+	if err != nil {
+		// Falha do serviço de chaves: não conta como tentativa errada.
+		s.keyerError(w, r, err)
+		return
+	}
+	if !ok {
 		n, err := s.store.RecordPinFailure(r.Context(), userID)
 		if err != nil {
 			s.internalError(w, r, err)
@@ -195,9 +202,9 @@ func (s *Server) handleSetLock(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	pinHash, salt, err := newPinHash(req.Pin)
+	pinHash, salt, scheme, err := s.newPinHash(r.Context(), req.Pin)
 	if err != nil {
-		s.internalError(w, r, err)
+		s.keyerError(w, r, err)
 		return
 	}
 	code, err := newRecoveryCode()
@@ -205,7 +212,7 @@ func (s *Server) handleSetLock(w http.ResponseWriter, r *http.Request) {
 		s.internalError(w, r, err)
 		return
 	}
-	if err := s.store.SetRegistrationLock(r.Context(), currentUser(r).ID, pinHash, salt, recoveryHash(code)); err != nil {
+	if err := s.store.SetRegistrationLock(r.Context(), currentUser(r).ID, pinHash, salt, scheme, recoveryHash(code)); err != nil {
 		s.internalError(w, r, err)
 		return
 	}
@@ -241,7 +248,12 @@ func (s *Server) handleCheckPin(w http.ResponseWriter, r *http.Request) {
 		s.internalError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]bool{"ok": pinMatches(req.Pin, lock.PinSalt, lock.PinHash)})
+	ok, err := s.pinMatches(r.Context(), currentUser(r).ID, req.Pin, lock)
+	if err != nil {
+		s.keyerError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": ok})
 }
 
 func (s *Server) handleNewRecoveryCode(w http.ResponseWriter, r *http.Request) {
@@ -283,4 +295,18 @@ func (s *Server) handleAckAlerts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// keyerError responde a falhas do serviço de chaves do PIN. A operação é
+// recusada (falha fechada) e o cliente pode tentar de novo depois.
+func (s *Server) keyerError(w http.ResponseWriter, r *http.Request, err error) {
+	if errors.Is(err, pepper.ErrUnavailable) {
+		s.log.Error("serviço de chaves do PIN indisponível", "route", r.Pattern, "err", err)
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+			"error": "serviço temporariamente indisponível; tente de novo em instantes",
+			"code":  "temporarily_unavailable",
+		})
+		return
+	}
+	s.internalError(w, r, err)
 }

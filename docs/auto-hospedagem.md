@@ -26,6 +26,10 @@ Todas as opções são variáveis de ambiente (veja [.env.example](../.env.examp
 | `BATEPAPO_MAX_ATTACHMENT_BYTES` | 25 MiB | Tamanho máximo de anexo |
 | `BATEPAPO_RETENTION_DAYS` | `30` | Validade de mensagens não entregues, anexos e alertas de segurança |
 | `BATEPAPO_SESSION_IDLE_DAYS` | `90` | Sessões sem uso por esse tempo expiram |
+| `BATEPAPO_PIN_KEY_PROVIDER` | `local` | Onde fica a chave secreta do PIN: `local` (variável abaixo) ou `openbao` (OpenBao/Vault Transit, recomendado em produção). Veja a seção 3.9 de [seguranca-da-conta.md](seguranca-da-conta.md#39-chave-secreta-do-pin-fase-2a) |
+| `BATEPAPO_PIN_PEPPER` | — | Com `local`, **obrigatório em produção**: 32 bytes em hex (`openssl rand -hex 32`), diferente de `BATEPAPO_PHONE_PEPPER` |
+| `BATEPAPO_OPENBAO_ADDR` / `_TOKEN` ou `_TOKEN_FILE` | — | Com `openbao`: endereço (https) e token com permissão só de `hmac`/`verify` na chave do PIN. O arquivo do token é relido a cada uso |
+| `BATEPAPO_OPENBAO_MOUNT` / `_KEY` | `transit` / `batepapo-pin` | Com `openbao`: onde está o motor Transit e o nome da chave |
 | `BATEPAPO_LOCK_INACTIVITY_DAYS` | `7` | Depois desse tempo sem uso do aparelho registrado, o PIN deixa de ser exigido (recuperação para quem perdeu tudo). Veja [seguranca-da-conta.md](seguranca-da-conta.md) |
 
 ### Webhook de SMS
@@ -55,4 +59,9 @@ Quem hospeda continua sendo o controlador dos dados e deve manter sua própria p
 
 ## Backups
 
-Faça backup do PostgreSQL, do diretório de anexos e, separadamente e com cuidado redobrado, do `BATEPAPO_PHONE_PEPPER`.
+Faça backup do PostgreSQL, do diretório de anexos e, **separadamente** e com cuidado redobrado, dos segredos:
+
+- `BATEPAPO_PHONE_PEPPER`: se for perdido, ninguém consegue mais entrar pela conta do número;
+- a chave secreta do PIN (`BATEPAPO_PIN_PEPPER` ou a chave do OpenBao): se for perdida, nenhum PIN confere mais e trocar de celular passa a exigir o código de recuperação.
+
+Nunca guarde esses segredos junto com o backup do banco: a separação é o que protege os PINs se um backup vazar.
