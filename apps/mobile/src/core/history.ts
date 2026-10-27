@@ -11,9 +11,39 @@ export type MessageStatus = 'sending' | 'sent' | 'failed' | 'received';
  * - remote: só no servidor (ainda não baixado);
  * - downloading: baixando;
  * - expired: o servidor já apagou e ele nunca foi baixado;
- * - error: falhou ao baixar (dá para tentar de novo).
+ * - error: falhou ao baixar (dá para tentar de novo);
+ * - cleared: apagado do aparelho pela pessoa (dá para baixar de novo enquanto
+ *   o servidor ainda tiver o arquivo).
  */
-export type MediaState = 'ready' | 'remote' | 'downloading' | 'expired' | 'error';
+export type MediaState = 'ready' | 'remote' | 'downloading' | 'expired' | 'error' | 'cleared';
+
+export type MediaKindName = 'image' | 'video' | 'voice';
+
+/** Espaço ocupado pela mídia guardada no aparelho. */
+export interface MediaUsage {
+  totalBytes: number;
+  byKind: Record<MediaKindName, { count: number; bytes: number }>;
+  byConversation: { conversationId: string; title: string; count: number; bytes: number }[];
+}
+
+/** Filtro para listar/apagar mídia guardada. */
+export interface MediaFilter {
+  conversationId?: string;
+  kinds?: MediaKindName[];
+  /** Só mídia enviada/recebida antes deste instante (ms). */
+  olderThan?: number;
+}
+
+export interface StoredMediaRef {
+  conversationId: string;
+  senderId: string;
+  id: string;
+  kind: MediaKindName;
+  bytes: number;
+  sentAt: number;
+  /** Ainda não foi para o servidor: não pode ser apagada (seria a única cópia). */
+  unsent: boolean;
+}
 
 /** Ponteiro do anexo guardado com a mensagem. id vazio = ainda não enviado ao servidor. */
 export interface StoredAttachment {
@@ -301,6 +331,74 @@ export class History {
       limit,
     );
     return rows.map((r) => this.toMessage(r));
+  }
+
+  /** Mídia guardada no aparelho que atende ao filtro. */
+  async listStoredMedia(f: MediaFilter = {}): Promise<StoredMediaRef[]> {
+    const where = ["m.media_state = 'ready'", "m.kind IN ('image', 'video', 'voice')"];
+    const params: (string | number)[] = [];
+    if (f.conversationId) {
+      where.push('m.conversation_id = ?');
+      params.push(f.conversationId);
+    }
+    if (f.kinds?.length) {
+      where.push(`m.kind IN (${f.kinds.map(() => '?').join(', ')})`);
+      params.push(...f.kinds);
+    }
+    if (f.olderThan !== undefined) {
+      where.push('m.sent_at < ?');
+      params.push(f.olderThan);
+    }
+    const rows = await this.db.all<{
+      conversation_id: string;
+      sender_id: string;
+      id: string;
+      kind: MediaKindName;
+      attachment: string;
+      sent_at: number;
+    }>(
+      `SELECT m.conversation_id, m.sender_id, m.id, m.kind, m.attachment, m.sent_at FROM messages m
+        WHERE ${where.join(' AND ')} ORDER BY m.sent_at`,
+      ...params,
+    );
+    return rows.map((r) => {
+      const a = JSON.parse(r.attachment) as StoredAttachment;
+      return {
+        conversationId: r.conversation_id,
+        senderId: r.sender_id,
+        id: r.id,
+        kind: r.kind,
+        bytes: a.size,
+        sentAt: r.sent_at,
+        unsent: !a.id,
+      };
+    });
+  }
+
+  /** Quanto espaço a mídia ocupa, por tipo e por conversa. */
+  async mediaUsage(): Promise<MediaUsage> {
+    const items = await this.listStoredMedia();
+    const byKind: MediaUsage['byKind'] = {
+      image: { count: 0, bytes: 0 },
+      video: { count: 0, bytes: 0 },
+      voice: { count: 0, bytes: 0 },
+    };
+    for (const it of items) {
+      byKind[it.kind].count++;
+      byKind[it.kind].bytes += it.bytes;
+    }
+    const titles = new Map((await this.listConversations()).map((c) => [c.id, c.title]));
+    const perConversation = new Map<string, { count: number; bytes: number }>();
+    for (const it of items) {
+      const c = perConversation.get(it.conversationId) ?? { count: 0, bytes: 0 };
+      c.count++;
+      c.bytes += it.bytes;
+      perConversation.set(it.conversationId, c);
+    }
+    const byConversation = [...perConversation]
+      .map(([conversationId, c]) => ({ conversationId, title: titles.get(conversationId) ?? 'Conversa', ...c }))
+      .sort((x, y) => y.bytes - x.bytes);
+    return { totalBytes: items.reduce((s, it) => s + it.bytes, 0), byKind, byConversation };
   }
 
   async markRead(conversationId: string): Promise<void> {

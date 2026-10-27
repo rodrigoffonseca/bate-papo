@@ -1,8 +1,8 @@
 import { Image } from 'expo-image';
-import { Stack, useLocalSearchParams } from 'expo-router';
+import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, View } from 'react-native';
 
 import { errorMessage } from '@/components/format';
 import { useImageUri } from '@/components/media';
@@ -56,6 +56,27 @@ function ImageScreen({ m }: { m: Message }) {
 export default function Midia() {
   const { sender = '', id = '' } = useLocalSearchParams<{ sender: string; id: string }>();
   const m = useHistoryQuery((h) => h.getMessage(sender, id), [sender, id]);
+  const service = useService();
+  const router = useRouter();
+
+  const clear = () =>
+    Alert.alert(
+      'Apagar do aparelho?',
+      'A mensagem continua na conversa. Dá para baixar de novo enquanto o servidor ainda tiver o arquivo (até 30 dias depois do envio).',
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Apagar',
+          style: 'destructive',
+          onPress: async () => {
+            if (!m) return;
+            const ok = await service.clearMediaItem(m);
+            if (!ok) Alert.alert('Ainda não enviada', 'Esta mídia ainda não foi enviada; apagar agora perderia a única cópia.');
+            else router.back();
+          },
+        },
+      ],
+    );
 
   return (
     <View style={{ flex: 1, backgroundColor: '#000' }}>
@@ -65,6 +86,11 @@ export default function Midia() {
           headerStyle: { backgroundColor: '#000' },
           headerTintColor: '#fff',
           contentStyle: { backgroundColor: '#000' },
+          headerRight: () => (
+            <Pressable accessibilityRole="button" accessibilityLabel="Apagar do aparelho" onPress={clear} hitSlop={12}>
+              <Txt style={{ color: '#fff', fontSize: 15 }}>Apagar do aparelho</Txt>
+            </Pressable>
+          ),
         }}
       />
       {!m ? null : m.kind === 'video' ? <VideoScreen m={m} /> : <ImageScreen m={m} />}

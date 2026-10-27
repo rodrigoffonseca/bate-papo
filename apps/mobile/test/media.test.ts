@@ -8,6 +8,7 @@ import { BatePapoClient, KeyValueStorage } from '@bate-papo/client';
 import { directConversationId } from '../src/core/history';
 import { MemoryMediaStore, mediaKey } from '../src/core/media';
 import { AppService, MEDIA_LIMITS, MediaTooLargeError } from '../src/core/service';
+import { PIN } from './helpers';
 import { dbUrl, nextPhone, signUp, startServer, until } from './helpers';
 import { nodeSql } from './node-sql';
 
@@ -145,5 +146,105 @@ describe.skipIf(!dbUrl)('mídia no app', () => {
     await expect(hugo.app.readMedia(expired)).rejects.toThrow(/não está mais disponível/);
     gil.app.pause();
     hugo.app.pause();
+  });
+
+  it('limpeza: uso por tipo e conversa, apagar por filtro, baixar de novo e não perder o que não foi enviado', async () => {
+    const ana = await signUp(baseUrl, 'analimpa');
+    const bia = await signUp(baseUrl, 'bialimpa');
+    const caio = await signUp(baseUrl, 'caiolimpa');
+
+    await bia.app.sendMedia(ana.id, { kind: 'image', bytes: bytes(100_000, 3), mime: 'image/jpeg' });
+    await bia.app.sendMedia(ana.id, { kind: 'voice', bytes: bytes(20_000, 5), mime: 'audio/mp4', durationMs: 2000 });
+    await caio.app.sendMedia(ana.id, { kind: 'image', bytes: bytes(50_000, 7), mime: 'image/jpeg' });
+    const biaConv = directConversationId(bia.id);
+    const caioConv = directConversationId(caio.id);
+    await until(async () => ((await ana.app.mediaUsage()).byKind.image.count === 2 &&
+      (await ana.app.mediaUsage()).byKind.voice.count === 1 ? true : undefined));
+
+    const usage = await ana.app.mediaUsage();
+    expect(usage.totalBytes).toBe(170_000);
+    expect(usage.byKind).toMatchObject({ image: { count: 2, bytes: 150_000 }, voice: { count: 1, bytes: 20_000 } });
+    expect(usage.byConversation.map((c) => [c.title, c.count, c.bytes])).toEqual([
+      ['Bialimpa', 2, 120_000],
+      ['Caiolimpa', 1, 50_000],
+    ]);
+
+    // Apaga só as fotos da conversa com a Bia.
+    const r = await ana.app.clearMedia({ conversationId: biaConv, kinds: ['image'] });
+    expect(r).toEqual({ count: 1, bytes: 100_000, skipped: 0 });
+    const [voiceMsg, photoMsg] = await ana.app.history.listMessages(biaConv);
+    expect(photoMsg).toMatchObject({ kind: 'image', mediaState: 'cleared' });
+    expect(voiceMsg).toMatchObject({ kind: 'voice', mediaState: 'ready' });
+    expect(ana.media.files.has(mediaKey(bia.id, photoMsg!.id))).toBe(false);
+    expect((await ana.app.mediaUsage()).totalBytes).toBe(70_000);
+
+    // Enquanto o servidor tiver o arquivo, dá para ver de novo.
+    expect(await ana.app.readMedia(photoMsg!)).toEqual(bytes(100_000, 3));
+    expect((await ana.app.history.getMessage(bia.id, photoMsg!.id))!.mediaState).toBe('ready');
+
+    // Item individual.
+    const [caioPhoto] = await ana.app.history.listMessages(caioConv);
+    expect(await ana.app.clearMediaItem(caioPhoto!)).toBe(true);
+    expect((await ana.app.history.getMessage(caio.id, caioPhoto!.id))!.mediaState).toBe('cleared');
+
+    // Mídia que ainda não foi para o servidor nunca é apagada.
+    let offline = false;
+    const dani = new AppService({
+      db: nodeSql(),
+      media: new MemoryMediaStore(),
+      serverUrl: baseUrl,
+      fetch: (url, init) => (offline ? Promise.reject(new Error('sem rede')) : globalThis.fetch(url, init as RequestInit)),
+    });
+    await dani.init();
+    const phone = nextPhone('71');
+    await dani.verifyCode(phone, (await dani.requestCode(phone)).dev_code!);
+    await dani.saveProfile({ username: `dani${Math.floor(Math.random() * 1e7)}`, displayName: 'Dani' });
+    await dani.setPin(PIN);
+    await dani.recoveryCodeSaved();
+    offline = true;
+    await dani.sendMedia(ana.id, { kind: 'image', bytes: bytes(10_000, 9), mime: 'image/jpeg' });
+    const [unsent] = await dani.history.listMessages(directConversationId(ana.id));
+    expect(await dani.clearMedia()).toEqual({ count: 0, bytes: 0, skipped: 1 });
+    expect(await dani.clearMediaItem(unsent!)).toBe(false);
+    expect((await dani.history.getMessage(unsent!.senderId, unsent!.id))!.mediaState).toBe('ready');
+
+    for (const u of [ana, bia, caio]) u.app.pause();
+    dani.pause();
+  });
+
+  it('limpeza automática apaga a mídia antiga ao abrir o app', async () => {
+    let now = Date.now();
+    const db = nodeSql();
+    const media = new MemoryMediaStore();
+    const eva = new AppService({ db, media, serverUrl: baseUrl, now: () => now });
+    await eva.init();
+    const phone = nextPhone('81');
+    await eva.verifyCode(phone, (await eva.requestCode(phone)).dev_code!);
+    await eva.saveProfile({ username: `eva${Math.floor(Math.random() * 1e7)}`, displayName: 'Eva' });
+    await eva.setPin(PIN);
+    await eva.recoveryCodeSaved();
+    const fabio = await signUp(baseUrl, 'fabiolimpa');
+
+    await eva.sendMedia(fabio.id, { kind: 'image', bytes: bytes(30_000, 2), mime: 'image/jpeg' });
+    now += 40 * 24 * 60 * 60 * 1000;
+    await eva.sendMedia(fabio.id, { kind: 'image', bytes: bytes(30_000, 4), mime: 'image/jpeg' });
+    expect((await eva.mediaUsage()).byKind.image.count).toBe(2);
+
+    // Ligar a limpeza de 30 dias já apaga a foto de 40 dias atrás.
+    expect(await eva.setAutoCleanup(30)).toEqual({ count: 1, bytes: 30_000, skipped: 0 });
+    expect(eva.getState().autoCleanupDays).toBe(30);
+    eva.pause();
+
+    // A configuração vale nas próximas aberturas do app.
+    now += 31 * 24 * 60 * 60 * 1000;
+    const reopened = new AppService({ db, media, serverUrl: baseUrl, now: () => now });
+    await reopened.init();
+    expect(reopened.getState().autoCleanupDays).toBe(30);
+    expect((await reopened.mediaUsage()).totalBytes).toBe(0);
+    expect(media.files.size).toBe(0);
+
+    expect(await reopened.setAutoCleanup(0)).toBeNull();
+    reopened.pause();
+    fabio.app.pause();
   });
 });

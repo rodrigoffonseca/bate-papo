@@ -30,7 +30,7 @@ export function formatDuration(ms: number | undefined): string {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 }
 
-function formatSize(bytes: number): string {
+export function formatSize(bytes: number): string {
   return bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.ceil(bytes / 1024)} KB`;
 }
 
@@ -49,9 +49,15 @@ function boxSize(m: Message) {
 export function useImageUri(m: Message): string | undefined {
   const service = useService();
   const key = `${m.senderId}:${m.id}`;
-  const [uri, setUri] = useState(imageCache.get(key));
+  const ready = m.mediaState === 'ready';
+  const [uri, setUri] = useState(ready ? imageCache.get(key) : undefined);
   useEffect(() => {
-    if (uri || m.mediaState !== 'ready' || !m.attachment) return;
+    // Apagada do aparelho: some também da memória.
+    if (!ready) {
+      imageCache.delete(key);
+      return;
+    }
+    if (uri || !m.attachment) return;
     let alive = true;
     service
       .readMedia(m)
@@ -66,8 +72,9 @@ export function useImageUri(m: Message): string | undefined {
       alive = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [service, key, uri, m.mediaState]);
-  return uri;
+  }, [service, key, uri, ready]);
+  // Se a mídia foi apagada do aparelho, não mostra a cópia em memória.
+  return ready ? (uri ?? imageCache.get(key)) : undefined;
 }
 
 /** Faixa de estado sobre a mídia: baixando, expirado, erro ou "toque para baixar". */
@@ -76,6 +83,8 @@ function MediaOverlay({ m, onDownload }: { m: Message; onDownload: () => void })
   const label =
     m.mediaState === 'expired'
       ? 'Arquivo expirado no servidor'
+      : m.mediaState === 'cleared'
+        ? '⬇ Apagada do aparelho · baixar de novo'
       : m.mediaState === 'error'
         ? 'Falha ao baixar · tocar para tentar'
         : m.mediaState === 'remote'
@@ -197,6 +206,7 @@ export function VoiceContent({ m }: { m: Message }) {
   };
 
   if (m.mediaState === 'expired') return <Txt muted>🎤 Áudio expirado no servidor</Txt>;
+  const cleared = m.mediaState === 'cleared';
   return (
     <View style={{ width: 220, gap: 4 }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
@@ -219,6 +229,7 @@ export function VoiceContent({ m }: { m: Message }) {
           {formatDuration(status.playing || progress > 0 ? status.currentTime * 1000 : total)}
         </Txt>
       </View>
+      {cleared && !uri && <Txt muted style={{ fontSize: 12 }}>Apagado do aparelho · toque para baixar de novo</Txt>}
       {error && <Txt style={{ color: t.danger, fontSize: 12 }}>{error}</Txt>}
     </View>
   );

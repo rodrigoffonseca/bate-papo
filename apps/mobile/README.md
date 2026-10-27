@@ -20,6 +20,13 @@ App para Android e iOS em React Native ([Expo](https://expo.dev) SDK 57 + Expo R
 - **Mensagens de voz:** toque no microfone para gravar e em ➤ para enviar, com player na conversa.
 - **Download:** fotos e áudios de até 8 MB chegam já baixados; vídeos baixam com um toque, para economizar dados.
 - **Mídia que falha sem rede** fica guardada e é reenviada com um toque, sem cifrar de novo.
+- **Armazenamento** (em Ajustes):
+  - espaço usado por fotos, vídeos e áudios, no total, por tipo e por conversa;
+  - apagar por conversa, por tipo, a mídia antiga (mais de 30 ou 90 dias) ou tudo;
+  - **limpeza automática** opcional (30, 90 ou 365 dias), executada ao abrir o app;
+  - apagar um item direto da tela cheia.
+
+  As mensagens continuam na conversa, e a mídia apagada pode ser baixada de novo enquanto o servidor ainda tiver o arquivo (até 30 dias). Mídia ainda não enviada nunca é apagada.
 
 Próximas fatias: grupos e tela do número de segurança (QR code); notificações push.
 

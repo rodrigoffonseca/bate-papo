@@ -16,7 +16,14 @@ import {
   newMessageId,
 } from '@bate-papo/client';
 
-import { type Contact, History, type Message, type StoredAttachment, directConversationId } from './history';
+import {
+  type Contact,
+  History,
+  type MediaFilter,
+  type Message,
+  type StoredAttachment,
+  directConversationId,
+} from './history';
 import { type MediaStore, extensionFor, mediaKey } from './media';
 import { SqlKV } from './kv';
 import { type Sql, migrate } from './sql';
@@ -41,6 +48,8 @@ export interface AppState {
   pinReminderDue: boolean;
   /** Por que a sessão terminou sem o usuário sair (ex.: registro em outro aparelho). */
   signedOutReason: 'session-ended' | null;
+  /** Limpeza automática de mídia: apaga do aparelho o que tiver mais de N dias (0 = desligada). */
+  autoCleanupDays: number;
 }
 
 export interface ServiceDeps {
@@ -99,7 +108,21 @@ const INITIAL: AppState = {
   recoveryCode: null,
   pinReminderDue: false,
   signedOutReason: null,
+  autoCleanupDays: 0,
 };
+
+/** Opções oferecidas na tela de armazenamento (0 = desligada). */
+export const AUTO_CLEANUP_OPTIONS = [0, 30, 90, 365] as const;
+const AUTO_CLEANUP_KEY = 'app:auto-cleanup-days';
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+export interface CleanupResult {
+  /** Arquivos apagados do aparelho. */
+  count: number;
+  bytes: number;
+  /** Mídia ainda não enviada, que não pode ser apagada (seria a única cópia). */
+  skipped: number;
+}
 
 export class AppService {
   readonly history: History;
@@ -197,6 +220,7 @@ export class AppService {
     this.set({ me, signedOutReason: null });
     await this.updatePhase(pin);
     this.client.connect();
+    await this.runAutoCleanup();
   }
 
   private async updatePhase(pinEnabled: boolean): Promise<void> {
@@ -410,6 +434,56 @@ export class AppService {
     } catch {
       await this.history.setOutgoingStatus(id, 'failed');
     }
+  }
+
+  // ---- limpeza de mídia do aparelho ----
+
+  /**
+   * Apaga do aparelho a mídia que atende ao filtro. As mensagens continuam na
+   * conversa e a mídia pode ser baixada de novo enquanto o servidor ainda tiver
+   * o arquivo. Mídia ainda não enviada é preservada.
+   */
+  async clearMedia(filter: MediaFilter = {}): Promise<CleanupResult> {
+    const result: CleanupResult = { count: 0, bytes: 0, skipped: 0 };
+    for (const it of await this.history.listStoredMedia(filter)) {
+      if (it.unsent) {
+        result.skipped++;
+        continue;
+      }
+      await this.deps.media.delete(mediaKey(it.senderId, it.id));
+      await this.history.setMedia(it.senderId, it.id, { mediaState: 'cleared' });
+      result.count++;
+      result.bytes += it.bytes;
+    }
+    return result;
+  }
+
+  /** Apaga do aparelho a mídia de uma mensagem. Devolve false se ela ainda não foi enviada. */
+  async clearMediaItem(m: Pick<Message, 'senderId' | 'id'>): Promise<boolean> {
+    const msg = await this.history.getMessage(m.senderId, m.id);
+    if (!msg?.attachment || msg.mediaState !== 'ready') return true;
+    if (!msg.attachment.id) return false;
+    await this.deps.media.delete(mediaKey(m.senderId, m.id));
+    await this.history.setMedia(m.senderId, m.id, { mediaState: 'cleared' });
+    return true;
+  }
+
+  mediaUsage() {
+    return this.history.mediaUsage();
+  }
+
+  /** Liga (N dias) ou desliga (0) a limpeza automática e já a executa. */
+  async setAutoCleanup(days: number): Promise<CleanupResult | null> {
+    await this.kv.set(AUTO_CLEANUP_KEY, String(days));
+    this.set({ autoCleanupDays: days });
+    return this.runAutoCleanup();
+  }
+
+  private async runAutoCleanup(): Promise<CleanupResult | null> {
+    const days = Number((await this.kv.get(AUTO_CLEANUP_KEY)) ?? 0);
+    if (days !== this.state.autoCleanupDays) this.set({ autoCleanupDays: days });
+    if (!days) return null;
+    return this.clearMedia({ olderThan: this.now() - days * DAY_MS });
   }
 
   /** Baixa (cifrado) o anexo de uma mensagem recebida e o guarda no aparelho. */

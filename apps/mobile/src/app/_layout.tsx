@@ -48,6 +48,7 @@ function Gate() {
       <Stack.Screen name="recuperacao" options={{ title: '' }} />
       <Stack.Screen name="lembrete-pin" options={{ title: 'Lembra seu PIN?', presentation: 'modal' }} />
       <Stack.Screen name="midia" options={{ title: '', presentation: 'fullScreenModal' }} />
+      <Stack.Screen name="armazenamento" options={{ title: 'Armazenamento' }} />
     </Stack>
   );
 }
