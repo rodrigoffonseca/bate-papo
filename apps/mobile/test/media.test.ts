@@ -9,7 +9,7 @@ import { directConversationId } from '../src/core/history';
 import { MemoryMediaStore, mediaKey } from '../src/core/media';
 import { AppService, MEDIA_LIMITS, MediaTooLargeError } from '../src/core/service';
 import { PIN } from './helpers';
-import { dbUrl, nextPhone, signUp, startServer, until } from './helpers';
+import { dbUrl, nextPhone, randomSuffix, signUp, startServer, until } from './helpers';
 import { nodeSql } from './node-sql';
 
 let baseUrl = '';
@@ -198,7 +198,7 @@ describe.skipIf(!dbUrl)('mídia no app', () => {
     await dani.init();
     const phone = nextPhone('71');
     await dani.verifyCode(phone, (await dani.requestCode(phone)).dev_code!);
-    await dani.saveProfile({ username: `dani${Math.floor(Math.random() * 1e7)}`, displayName: 'Dani' });
+    await dani.saveProfile({ username: `dani${randomSuffix()}`, displayName: 'Dani' });
     await dani.setPin(PIN);
     await dani.recoveryCodeSaved();
     offline = true;
@@ -220,7 +220,7 @@ describe.skipIf(!dbUrl)('mídia no app', () => {
     await eva.init();
     const phone = nextPhone('81');
     await eva.verifyCode(phone, (await eva.requestCode(phone)).dev_code!);
-    await eva.saveProfile({ username: `eva${Math.floor(Math.random() * 1e7)}`, displayName: 'Eva' });
+    await eva.saveProfile({ username: `eva${randomSuffix()}`, displayName: 'Eva' });
     await eva.setPin(PIN);
     await eva.recoveryCodeSaved();
     const fabio = await signUp(baseUrl, 'fabiolimpa');

@@ -3,6 +3,7 @@
 // pelo serviço do app.
 
 import { type ChildProcess, execFileSync, spawn } from 'node:child_process';
+import { randomInt } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -21,7 +22,7 @@ const serverDir = fileURLToPath(new URL('../../../server', import.meta.url));
 
 // Ponto de partida aleatório: os arquivos de teste rodam em paralelo contra o
 // mesmo banco e não podem gerar os mesmos números de telefone.
-let seq = Math.floor(Math.random() * 80_000_000);
+let seq = randomInt(80_000_000);
 
 /** Um número de celular novo a cada chamada. */
 export function nextPhone(ddd = '11'): string {
@@ -30,6 +31,11 @@ export function nextPhone(ddd = '11'): string {
 
 export function uniqueSuffix(): number {
   return seq;
+}
+
+/** Sufixo aleatório para nomes de usuário de teste. */
+export function randomSuffix(): number {
+  return randomInt(10_000_000);
 }
 
 async function freePort(): Promise<number> {
