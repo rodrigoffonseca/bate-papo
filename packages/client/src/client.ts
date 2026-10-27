@@ -1,4 +1,6 @@
 import {
+  type EncryptedAttachment,
+  attachmentDigestMatches,
   decrypt,
   decryptAttachment,
   encrypt,
@@ -29,8 +31,8 @@ import {
   type User,
   parseEnvelope,
 } from './api.js';
-import type { AttachmentPointer, Payload, ReceivedMessage } from './messages.js';
-import { validatePayload } from './messages.js';
+import type { AttachmentPointer, MediaKind, Payload, ReceivedMessage } from './messages.js';
+import { MAX_THUMBNAIL_CHARS, validatePayload } from './messages.js';
 import type { ClientStorage } from './storage.js';
 
 const PREKEY_BATCH = 100;
@@ -98,6 +100,24 @@ export class UnlockError extends Error {
     super(reason);
     this.name = 'UnlockError';
   }
+}
+
+/** O servidor já apagou o anexo (prazo de retenção vencido). */
+export class AttachmentExpiredError extends Error {
+  constructor() {
+    super('o anexo não está mais disponível no servidor');
+    this.name = 'AttachmentExpiredError';
+  }
+}
+
+/** Metadados de um anexo informados pelo app. */
+export interface MediaMeta {
+  mime: string;
+  width?: number;
+  height?: number;
+  durationMs?: number;
+  /** Miniatura JPEG pequena em base64 (até MAX_THUMBNAIL_CHARS). */
+  thumbnail?: string;
 }
 
 export class IdentityChangedError extends Error {
@@ -386,40 +406,75 @@ export class BatePapoClient {
     return this.send(target, { kind: 'text', text }, opts.id);
   }
 
-  sendImage(target: Target, data: Uint8Array, meta: { mime: string; width?: number; height?: number; caption?: string }) {
+  sendImage(target: Target, data: Uint8Array, meta: MediaMeta & { caption?: string }) {
+    return this.sendMedia(target, 'image', data, meta);
+  }
+
+  sendVideo(target: Target, data: Uint8Array, meta: MediaMeta & { caption?: string }) {
+    return this.sendMedia(target, 'video', data, meta);
+  }
+
+  sendVoice(target: Target, data: Uint8Array, meta: MediaMeta) {
+    return this.sendMedia(target, 'voice', data, meta);
+  }
+
+  /** Cifra, envia o arquivo e manda a mensagem, numa chamada só. */
+  async sendMedia(target: Target, kind: MediaKind, data: Uint8Array, meta: MediaMeta & { caption?: string }) {
     const { caption, ...rest } = meta;
-    return this.sendAttachment(target, 'image', data, rest, caption);
+    const pointer = await this.uploadAttachment(encryptAttachment(data), { ...rest, size: data.length });
+    return this.sendAttachment(target, kind, pointer, { caption });
   }
 
-  sendVoice(target: Target, data: Uint8Array, meta: { mime: string; durationMs: number }) {
-    return this.sendAttachment(target, 'voice', data, meta);
-  }
-
-  private async sendAttachment(
-    target: Target,
-    kind: 'image' | 'voice',
-    data: Uint8Array,
-    meta: Pick<AttachmentPointer, 'mime' | 'width' | 'height' | 'durationMs'>,
-    caption?: string,
-  ) {
-    const enc = encryptAttachment(data);
+  /**
+   * Envia ao servidor um anexo já cifrado (com encryptAttachment) e devolve o
+   * ponteiro que vai, cifrado, dentro da mensagem. Separado do envio da
+   * mensagem para o app guardar a cópia cifrada antes e poder reenviar.
+   */
+  async uploadAttachment(enc: EncryptedAttachment, meta: MediaMeta & { size: number }): Promise<AttachmentPointer> {
     const { id } = await this.api.uploadAttachment(enc.ciphertext);
-    const attachment: AttachmentPointer = {
+    return {
       id,
       key: toBase64(enc.key),
       digest: toBase64(enc.digest),
       mime: meta.mime,
-      size: data.length,
+      size: meta.size,
       ...(meta.width !== undefined && { width: meta.width }),
       ...(meta.height !== undefined && { height: meta.height }),
       ...(meta.durationMs !== undefined && { durationMs: meta.durationMs }),
+      ...(meta.thumbnail && meta.thumbnail.length <= MAX_THUMBNAIL_CHARS && { thumbnail: meta.thumbnail }),
     };
-    return this.send(target, { kind, attachment, ...(caption && { text: caption }) });
+  }
+
+  /** Manda a mensagem com o ponteiro de um anexo já enviado. */
+  sendAttachment(
+    target: Target,
+    kind: MediaKind,
+    attachment: AttachmentPointer,
+    opts: { caption?: string; id?: string } = {},
+  ) {
+    return this.send(target, { kind, attachment, ...(opts.caption && { text: opts.caption }) }, opts.id);
+  }
+
+  /**
+   * Baixa o anexo e confere sua integridade, mas o devolve **cifrado** (para
+   * guardar no aparelho sem expor o conteúdo). Lança AttachmentExpiredError se
+   * o servidor já o apagou.
+   */
+  async downloadEncryptedAttachment(pointer: AttachmentPointer): Promise<Uint8Array> {
+    let ciphertext: Uint8Array;
+    try {
+      ciphertext = await this.api.downloadAttachment(pointer.id);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 404) throw new AttachmentExpiredError();
+      throw err;
+    }
+    if (!attachmentDigestMatches(ciphertext, fromBase64(pointer.digest))) throw new Error('anexo corrompido ou adulterado');
+    return ciphertext;
   }
 
   /** Baixa, verifica e decifra o anexo de uma mensagem recebida. */
   async downloadAttachment(pointer: AttachmentPointer): Promise<Uint8Array> {
-    const ciphertext = await this.api.downloadAttachment(pointer.id);
+    const ciphertext = await this.downloadEncryptedAttachment(pointer);
     return decryptAttachment(ciphertext, fromBase64(pointer.key), fromBase64(pointer.digest));
   }
 

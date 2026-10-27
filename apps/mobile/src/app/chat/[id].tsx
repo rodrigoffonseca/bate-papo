@@ -1,12 +1,15 @@
 import { Stack, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useCallback, useState } from 'react';
-import { FlatList, KeyboardAvoidingView, Platform, Pressable, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, FlatList, KeyboardAvoidingView, Platform, Pressable, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { formatTime } from '@/components/format';
+import { errorMessage, formatTime } from '@/components/format';
+import { ImageContent, VideoContent, VoiceContent, formatDuration } from '@/components/media';
 import { Banner, Screen, Txt } from '@/components/ui';
 import type { Message } from '@/core/history';
 import { useAppState, useHistoryQuery, useService } from '@/platform/app';
+import { pickFromGallery, prepareAsset, takeWithCamera } from '@/platform/pick-media';
+import { useVoiceRecorder } from '@/platform/voice';
 import { spacing, useTheme } from '@/theme';
 
 const STATUS_ICON: Record<Message['status'], string> = { sending: '🕓', sent: '✓', failed: '⚠️', received: '' };
@@ -17,42 +20,94 @@ const STATUS_LABEL: Record<Message['status'], string> = {
   received: '',
 };
 
-/** Fotos e áudios chegam na próxima versão; por enquanto, um aviso no lugar. */
-function messageText(m: Message): string {
-  if (m.kind === 'image') return `📷 Foto${m.text ? `: ${m.text}` : ''} (abra numa versão mais nova do app)`;
-  if (m.kind === 'voice') return '🎤 Mensagem de voz (abra numa versão mais nova do app)';
+function describe(m: Message): string {
+  if (m.kind === 'image') return m.text ? `Foto: ${m.text}` : 'Foto';
+  if (m.kind === 'video') return `Vídeo de ${formatDuration(m.attachment?.durationMs)}${m.text ? `: ${m.text}` : ''}`;
+  if (m.kind === 'voice') return `Mensagem de voz de ${formatDuration(m.attachment?.durationMs)}`;
   return m.text ?? '';
 }
 
 function Bubble({ m, onRetry }: { m: Message; onRetry: (id: string) => void }) {
   const t = useTheme();
   const failed = m.status === 'failed';
+  const media = m.kind === 'image' || m.kind === 'video' || m.kind === 'voice';
   return (
-    <Pressable
-      disabled={!failed}
-      onPress={() => onRetry(m.id)}
-      accessibilityRole={failed ? 'button' : 'text'}
-      accessibilityLabel={`${m.outgoing ? 'Você' : 'Contato'}: ${messageText(m)}. ${formatTime(m.sentAt)}${
+    <View
+      accessible={!media}
+      accessibilityLabel={`${m.outgoing ? 'Você' : 'Contato'}: ${describe(m)}. ${formatTime(m.sentAt)}${
         m.outgoing ? `, ${STATUS_LABEL[m.status]}` : ''
       }`}
       style={{
         alignSelf: m.outgoing ? 'flex-end' : 'flex-start',
-        maxWidth: '80%',
+        maxWidth: '85%',
         backgroundColor: m.outgoing ? t.bubbleOut : t.bubbleIn,
         borderRadius: 16,
         borderBottomRightRadius: m.outgoing ? 4 : 16,
         borderBottomLeftRadius: m.outgoing ? 16 : 4,
-        paddingHorizontal: 12,
-        paddingVertical: 8,
+        padding: media && m.kind !== 'voice' ? 4 : undefined,
+        paddingHorizontal: media && m.kind !== 'voice' ? 4 : 12,
+        paddingVertical: media && m.kind !== 'voice' ? 4 : 8,
         marginVertical: 2,
         borderWidth: failed ? 1 : 0,
         borderColor: t.danger,
+        gap: 4,
       }}
     >
-      <Txt selectable>{messageText(m)}</Txt>
-      <Txt muted style={{ fontSize: 11, alignSelf: 'flex-end', marginTop: 2 }}>
-        {formatTime(m.sentAt)} {m.outgoing ? STATUS_ICON[m.status] : ''}
-      </Txt>
+      {m.kind === 'image' && <ImageContent m={m} />}
+      {m.kind === 'video' && <VideoContent m={m} />}
+      {m.kind === 'voice' && <VoiceContent m={m} />}
+      {m.text && m.kind !== 'voice' ? (
+        <Txt selectable style={media ? { paddingHorizontal: 8 } : undefined}>
+          {m.text}
+        </Txt>
+      ) : null}
+      <Pressable
+        disabled={!failed}
+        onPress={() => onRetry(m.id)}
+        accessibilityRole={failed ? 'button' : undefined}
+        accessibilityLabel={failed ? 'Mensagem não enviada. Tentar de novo' : undefined}
+        style={{ alignSelf: 'flex-end', paddingHorizontal: media && m.kind !== 'voice' ? 8 : 0 }}
+      >
+        <Txt muted style={{ fontSize: 11, color: failed ? t.danger : undefined }}>
+          {failed ? 'Não enviada · tocar para tentar ' : ''}
+          {formatTime(m.sentAt)} {m.outgoing ? STATUS_ICON[m.status] : ''}
+        </Txt>
+      </Pressable>
+    </View>
+  );
+}
+
+function RoundButton({
+  label,
+  icon,
+  onPress,
+  disabled,
+  filled,
+}: {
+  label: string;
+  icon: string;
+  onPress: () => void;
+  disabled?: boolean;
+  filled?: boolean;
+}) {
+  const t = useTheme();
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      disabled={disabled}
+      onPress={onPress}
+      style={({ pressed }) => ({
+        width: 44,
+        height: 44,
+        borderRadius: 22,
+        backgroundColor: filled ? t.primary : 'transparent',
+        alignItems: 'center',
+        justifyContent: 'center',
+        opacity: disabled ? 0.4 : pressed ? 0.7 : 1,
+      })}
+    >
+      <Txt style={{ color: filled ? t.onPrimary : t.primary, fontSize: 20, fontWeight: '700' }}>{icon}</Txt>
     </Pressable>
   );
 }
@@ -64,6 +119,8 @@ export default function Chat() {
   const t = useTheme();
   const insets = useSafeAreaInsets();
   const [text, setText] = useState('');
+  const [preparing, setPreparing] = useState(false);
+  const voice = useVoiceRecorder();
 
   const conversation = useHistoryQuery((h) => h.getConversation(id), [id]);
   const messages = useHistoryQuery((h) => h.listMessages(id), [id]);
@@ -79,6 +136,49 @@ export default function Chat() {
     if (!conversation || !text.trim()) return;
     void service.sendText(conversation.peerId, text);
     setText('');
+  };
+
+  /** Lê, prepara e envia a foto/vídeo; a legenda é o texto digitado. */
+  const sendPicked = async (source: 'camera' | 'gallery') => {
+    if (!conversation) return;
+    try {
+      const asset = source === 'camera' ? await takeWithCamera() : await pickFromGallery();
+      if (!asset) return;
+      setPreparing(true);
+      const input = await prepareAsset(asset);
+      const caption = text.trim();
+      setText('');
+      await service.sendMedia(conversation.peerId, { ...input, ...(caption && { caption }) });
+    } catch (err) {
+      Alert.alert('Não foi possível enviar', errorMessage(err));
+    } finally {
+      setPreparing(false);
+    }
+  };
+
+  const attach = () =>
+    Alert.alert('Enviar foto ou vídeo', undefined, [
+      { text: 'Câmera', onPress: () => void sendPicked('camera') },
+      { text: 'Galeria', onPress: () => void sendPicked('gallery') },
+      { text: 'Cancelar', style: 'cancel' },
+    ]);
+
+  const startVoice = async () => {
+    try {
+      await voice.start();
+    } catch (err) {
+      Alert.alert('Não foi possível gravar', errorMessage(err));
+    }
+  };
+
+  const finishVoice = async () => {
+    if (!conversation) return;
+    try {
+      const input = await voice.stop();
+      if (input) await service.sendMedia(conversation.peerId, input);
+    } catch (err) {
+      Alert.alert('Não foi possível enviar o áudio', errorMessage(err));
+    }
   };
 
   const keyChanged = conversation && identityAlert?.userId === conversation.peerId;
@@ -107,7 +207,7 @@ export default function Chat() {
           ListFooterComponent={
             <View style={{ padding: spacing.md, alignItems: 'center' }}>
               <Txt muted style={{ fontSize: 12, textAlign: 'center' }}>
-                🔒 Mensagens protegidas com criptografia de ponta a ponta.
+                🔒 Mensagens, fotos, vídeos e áudios protegidos com criptografia de ponta a ponta.
               </Txt>
             </View>
           }
@@ -116,7 +216,7 @@ export default function Chat() {
           style={{
             flexDirection: 'row',
             alignItems: 'flex-end',
-            gap: spacing.sm,
+            gap: spacing.xs,
             padding: spacing.sm,
             paddingBottom: Math.max(insets.bottom, spacing.sm),
             borderTopWidth: 1,
@@ -124,43 +224,52 @@ export default function Chat() {
             backgroundColor: t.background,
           }}
         >
-          <TextInput
-            accessibilityLabel="Mensagem"
-            placeholder="Mensagem"
-            placeholderTextColor={t.textMuted}
-            value={text}
-            onChangeText={setText}
-            multiline
-            maxLength={4000}
-            style={{
-              flex: 1,
-              maxHeight: 140,
-              color: t.text,
-              backgroundColor: t.surface,
-              borderRadius: 20,
-              paddingHorizontal: 16,
-              paddingTop: 10,
-              paddingBottom: 10,
-              fontSize: 16,
-            }}
-          />
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Enviar"
-            disabled={!text.trim()}
-            onPress={send}
-            style={({ pressed }) => ({
-              width: 44,
-              height: 44,
-              borderRadius: 22,
-              backgroundColor: t.primary,
-              alignItems: 'center',
-              justifyContent: 'center',
-              opacity: !text.trim() ? 0.4 : pressed ? 0.8 : 1,
-            })}
-          >
-            <Txt style={{ color: t.onPrimary, fontSize: 20, fontWeight: '700' }}>➤</Txt>
-          </Pressable>
+          {voice.recording ? (
+            <>
+              <RoundButton label="Descartar áudio" icon="🗑" onPress={() => void voice.cancel()} />
+              <View
+                accessibilityLiveRegion="polite"
+                style={{ flex: 1, height: 44, flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingHorizontal: spacing.sm }}
+              >
+                <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: t.danger }} />
+                <Txt>Gravando {formatDuration(voice.durationMs)}</Txt>
+              </View>
+              <RoundButton label="Enviar áudio" icon="➤" filled onPress={() => void finishVoice()} />
+            </>
+          ) : (
+            <>
+              {preparing ? (
+                <ActivityIndicator style={{ width: 44, height: 44 }} color={t.primary} />
+              ) : (
+                <RoundButton label="Enviar foto ou vídeo" icon="📎" onPress={attach} />
+              )}
+              <TextInput
+                accessibilityLabel="Mensagem"
+                placeholder={preparing ? 'Preparando arquivo…' : 'Mensagem'}
+                placeholderTextColor={t.textMuted}
+                value={text}
+                onChangeText={setText}
+                multiline
+                maxLength={4000}
+                style={{
+                  flex: 1,
+                  maxHeight: 140,
+                  color: t.text,
+                  backgroundColor: t.surface,
+                  borderRadius: 20,
+                  paddingHorizontal: 16,
+                  paddingTop: 10,
+                  paddingBottom: 10,
+                  fontSize: 16,
+                }}
+              />
+              {text.trim() ? (
+                <RoundButton label="Enviar" icon="➤" filled onPress={send} />
+              ) : (
+                <RoundButton label="Gravar mensagem de voz" icon="🎤" filled onPress={() => void startVoice()} />
+              )}
+            </>
+          )}
         </View>
       </KeyboardAvoidingView>
     </Screen>

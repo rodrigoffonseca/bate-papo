@@ -53,6 +53,14 @@ export default function Ajustes() {
         </View>
 
         <View style={{ backgroundColor: t.surface, borderRadius: 12, padding: spacing.md, gap: spacing.sm }}>
+          <Txt style={{ fontWeight: '600' }}>💾 Armazenamento</Txt>
+          <Txt muted style={{ fontSize: 14 }}>
+            Veja quanto espaço fotos, vídeos e áudios ocupam e apague o que não precisa mais.
+          </Txt>
+          <Button variant="ghost" title="Gerenciar armazenamento" onPress={() => router.push('/armazenamento')} />
+        </View>
+
+        <View style={{ backgroundColor: t.surface, borderRadius: 12, padding: spacing.md, gap: spacing.sm }}>
           <Txt style={{ fontWeight: '600' }}>🔑 Segurança da conta</Txt>
           <Txt muted style={{ fontSize: 14 }}>
             Seu PIN impede que alguém use sua conta mesmo clonando o seu chip. O código de recuperação substitui o PIN

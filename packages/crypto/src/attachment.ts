@@ -23,6 +23,11 @@ export function encryptAttachment(data: Uint8Array): EncryptedAttachment {
   return { ciphertext, key, digest: sha256(ciphertext) };
 }
 
+/** Confere se o arquivo cifrado corresponde ao resumo (digest) da mensagem. */
+export function attachmentDigestMatches(ciphertext: Uint8Array, digest: Uint8Array): boolean {
+  return equal(sha256(ciphertext), digest);
+}
+
 export function decryptAttachment(ciphertext: Uint8Array, key: Uint8Array, digest: Uint8Array): Uint8Array {
   if (!equal(sha256(ciphertext), digest)) throw new Error('anexo corrompido ou adulterado');
   if (ciphertext.length < 12 + 16) throw new Error('anexo truncado');

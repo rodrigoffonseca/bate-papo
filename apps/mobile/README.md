@@ -2,7 +2,7 @@
 
 App para Android e iOS em React Native ([Expo](https://expo.dev) SDK 57 + Expo Router).
 
-## O que já funciona (fatia 1)
+## O que já funciona
 
 - Cadastro pelo número de celular, com código por SMS
 - Perfil: nome e `@nome de usuário`
@@ -11,15 +11,34 @@ App para Android e iOS em React Native ([Expo](https://expo.dev) SDK 57 + Expo R
 - Conversa 1:1 de texto, cifrada de ponta a ponta, em tempo real; mensagens enviadas sem rede ficam marcadas e são reenviadas com um toque
 - Aviso quando a chave de segurança de um contato muda
 - Sair (apaga os dados do aparelho) e apagar a conta
+- PIN contra clonagem de chip, código de recuperação e alertas (veja `docs/seguranca-da-conta.md`)
+- **Fotos e vídeos** da câmera ou da galeria, com legenda:
+  - fotos reduzidas a 1600 px e recomprimidas, o que também remove metadados como a localização;
+  - vídeos de até 3 minutos e 60 MB;
+  - miniatura cifrada dentro da mensagem;
+  - tela cheia para ver foto e assistir vídeo.
+- **Mensagens de voz:** toque no microfone para gravar e em ➤ para enviar, com player na conversa.
+- **Download:** fotos e áudios de até 8 MB chegam já baixados; vídeos baixam com um toque, para economizar dados.
+- **Mídia que falha sem rede** fica guardada e é reenviada com um toque, sem cifrar de novo.
+- **Armazenamento** (em Ajustes):
+  - espaço usado por fotos, vídeos e áudios, no total, por tipo e por conversa;
+  - apagar por conversa, por tipo, a mídia antiga (mais de 30 ou 90 dias) ou tudo;
+  - **limpeza automática** opcional (30, 90 ou 365 dias), executada ao abrir o app;
+  - apagar um item direto da tela cheia.
 
-Próximas fatias: fotos e áudio; grupos e tela do número de segurança (QR code); notificações push.
+  As mensagens continuam na conversa, e a mídia apagada pode ser baixada de novo enquanto o servidor ainda tiver o arquivo (até 30 dias). Mídia ainda não enviada nunca é apagada.
+
+Próximas fatias: grupos e tela do número de segurança (QR code); notificações push.
 
 ## Onde ficam os dados
 
 | Dado | Onde |
 | --- | --- |
 | Chave do banco local (256 bits, aleatória) | Keychain (iOS) / Keystore (Android), só neste aparelho e fora dos backups |
-| Chaves privadas, sessões criptográficas, histórico de conversas | Banco SQLite cifrado com **SQLCipher** |
+| Chaves privadas, sessões criptográficas, histórico de conversas e chaves das mídias | Banco SQLite cifrado com **SQLCipher** |
+| Fotos, vídeos e áudios | Pasta do app, **ainda cifrados** (a mesma cópia cifrada que trafega pelo servidor) |
+| Vídeo ou áudio sendo reproduzido | Cópia decifrada temporária no cache do app, apagada ao sair da tela e a cada abertura do app |
+| Fotos na tela | Decifradas só na memória |
 | Nada disso | no servidor |
 
 O backup do Android está desativado (`allowBackup: false`): as conversas existem só no aparelho.

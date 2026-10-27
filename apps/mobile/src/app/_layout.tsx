@@ -3,6 +3,7 @@ import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
 
+import { clearImageCache } from '@/components/media';
 import { AppProvider, useAppState } from '@/platform/app';
 import { useTheme } from '@/theme';
 
@@ -18,6 +19,7 @@ function Gate() {
   useEffect(() => {
     if (phase === 'loading') return;
     SplashScreen.hideAsync();
+    if (phase === 'signed-out') clearImageCache();
     const [first, second] = segments as string[];
     const inAuth = first === '(auth)';
     const screen = inAuth ? second : first;
@@ -45,6 +47,8 @@ function Gate() {
       <Stack.Screen name="pin" options={{ title: '' }} />
       <Stack.Screen name="recuperacao" options={{ title: '' }} />
       <Stack.Screen name="lembrete-pin" options={{ title: 'Lembra seu PIN?', presentation: 'modal' }} />
+      <Stack.Screen name="midia" options={{ title: '', presentation: 'fullScreenModal' }} />
+      <Stack.Screen name="armazenamento" options={{ title: 'Armazenamento' }} />
     </Stack>
   );
 }

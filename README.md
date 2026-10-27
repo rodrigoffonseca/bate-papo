@@ -20,12 +20,12 @@ O Bate-Papo é um aplicativo de mensagens no estilo WhatsApp, pensado para o Bra
 | Nome de usuário (`@maria`) e nome de exibição | ✅ servidor + SDK |
 | Busca de contatos por nome de usuário ou telefone | ✅ servidor + SDK |
 | Mensagens de texto cifradas de ponta a ponta | ✅ servidor + SDK |
-| Fotos cifradas de ponta a ponta | ✅ servidor + SDK |
-| Mensagens de voz cifradas de ponta a ponta | ✅ servidor + SDK |
+| Fotos e vídeos cifrados de ponta a ponta | ✅ servidor + SDK + app |
+| Mensagens de voz cifradas de ponta a ponta | ✅ servidor + SDK + app |
 | Grupos (criar, adicionar/remover membros, administradores, sair) | ✅ servidor + SDK |
 | Entrega em tempo real (WebSocket) e fila para quem está offline | ✅ servidor + SDK |
 | Número de segurança (verificação de identidade) e alerta de troca de chave | ✅ SDK |
-| Aplicativo móvel (Android/iOS) | 🚧 em construção: cadastro, perfil e conversas de texto prontos ([apps/mobile](apps/mobile/)) |
+| Aplicativo móvel (Android/iOS) | 🚧 em construção: cadastro, perfil, conversas com texto, fotos, vídeos e voz prontos; faltam grupos ([apps/mobile](apps/mobile/)) |
 
 ## Arquitetura em 30 segundos
 
@@ -105,7 +105,7 @@ BATEPAPO_TEST_DATABASE_URL=postgres://localhost/batepapo_test npm test
 **MVP (agora)**
 - [x] Servidor, protocolo criptográfico e SDK
 - [x] App React Native (Expo) — fatia 1: cadastro, perfil, conversas e chat de texto
-- [ ] App — fatia 2: fotos (câmera/galeria) e mensagens de voz
+- [x] App — fatia 2: fotos e vídeos (câmera/galeria) e mensagens de voz
 - [ ] App — fatia 3: grupos e número de segurança com QR code
 - [ ] Notificações push sem conteúdo (apenas "você tem mensagens"), com opção sem Google/Apple via UnifiedPush
 - [ ] Rotação periódica da signed prekey

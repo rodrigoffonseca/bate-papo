@@ -23,7 +23,7 @@ Todas as opções são variáveis de ambiente (veja [.env.example](../.env.examp
 | `BATEPAPO_SMS_WEBHOOK_URL` / `_KEY` | — | Serviço que envia o SMS (veja abaixo) |
 | `BATEPAPO_TRUST_PROXY_HEADERS` | `false` | `true` atrás de proxy reverso, para limitar por IP real |
 | `BATEPAPO_BLOB_DIR` | `./data/blobs` | Onde guardar anexos cifrados |
-| `BATEPAPO_MAX_ATTACHMENT_BYTES` | 25 MiB | Tamanho máximo de anexo |
+| `BATEPAPO_MAX_ATTACHMENT_BYTES` | 64 MiB | Tamanho máximo de anexo (o app limita vídeos a 60 MB e 3 minutos) |
 | `BATEPAPO_RETENTION_DAYS` | `30` | Validade de mensagens não entregues, anexos e alertas de segurança |
 | `BATEPAPO_SESSION_IDLE_DAYS` | `90` | Sessões sem uso por esse tempo expiram |
 | `BATEPAPO_PIN_KEY_PROVIDER` | `local` | Onde fica a chave secreta do PIN: `local` (variável abaixo) ou `openbao` (OpenBao/Vault Transit, recomendado em produção). Veja a seção 3.9 de [seguranca-da-conta.md](seguranca-da-conta.md#39-chave-secreta-do-pin-fase-2a) |

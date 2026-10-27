@@ -57,7 +57,16 @@ O conteúdo é um JSON (tipo, texto, ponteiro de anexo, grupo, `registration_id`
 
 ### Anexos
 
-Cada foto ou áudio é cifrado com uma chave AES-256 aleatória e nonce aleatório. O servidor guarda só os bytes cifrados; chave e SHA-256 viajam na mensagem E2EE. O destinatário confere o SHA-256 antes de decifrar.
+Cada foto, vídeo ou áudio é cifrado com uma chave AES-256 aleatória e nonce aleatório. O servidor guarda só os bytes cifrados; chave, SHA-256, tipo, dimensões, duração e uma **miniatura** pequena (para mostrar a mídia antes de baixar) viajam dentro da mensagem E2EE. O destinatário confere o SHA-256 antes de decifrar.
+
+No aparelho:
+- os arquivos ficam **cifrados**, com a chave no banco SQLCipher;
+- fotos são decifradas só na memória;
+- vídeos e áudios em reprodução usam uma cópia decifrada temporária no cache do app, apagada ao sair da tela e a cada abertura;
+- antes de cifrar, as fotos enviadas são recomprimidas, o que remove metadados como a localização GPS;
+- a pessoa pode apagar a mídia do aparelho a qualquer momento (por conversa, tipo ou idade) ou ligar a limpeza automática, o que reduz o que fica exposto se o celular for perdido.
+
+Hoje o arquivo inteiro é cifrado na memória do celular, o que limita vídeos a 60 MB. Cifrar em blocos (*streaming*) está no roteiro, para arquivos maiores.
 
 ### Verificação de identidade
 

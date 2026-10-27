@@ -68,7 +68,7 @@ func Load() (*Config, error) {
 		DevExposeOTP:       os.Getenv("BATEPAPO_DEV_EXPOSE_OTP") == "true",
 		TrustProxyHeaders:  os.Getenv("BATEPAPO_TRUST_PROXY_HEADERS") == "true",
 		BlobDir:            env("BATEPAPO_BLOB_DIR", "./data/blobs"),
-		MaxAttachmentBytes: 25 << 20,
+		MaxAttachmentBytes: 64 << 20, // vídeos curtos do celular cabem
 		RetentionPeriod:    30 * 24 * time.Hour,
 		SessionIdle:        90 * 24 * time.Hour,
 		LockInactivity:     7 * 24 * time.Hour,
