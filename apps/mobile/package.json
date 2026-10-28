@@ -57,7 +57,8 @@
     "ios": "expo run:ios",
     "typecheck": "tsc --noEmit",
     "lint": "expo lint",
-    "test": "vitest run"
+    "test": "vitest run",
+    "eas-build-post-install": "npm --prefix ../.. run build"
   },
   "private": true,
   "license": "GPL-3.0-or-later",

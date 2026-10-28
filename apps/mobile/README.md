@@ -74,7 +74,7 @@ cp .env.example .env.local        # ajuste o endereço do servidor
 npx expo run:android              # ou: npx expo run:ios (macOS + Xcode)
 ```
 
-Sem Android Studio/Xcode instalados, gere o *development build* na nuvem com `npx eas-cli@latest build --profile development`.
+Sem Android Studio/Xcode instalados, ou para instalar em celulares de outras pessoas, gere o app na nuvem com o EAS (perfis `preview` e `production` em `eas.json`). O passo a passo, com APK por link no Android e TestFlight no iPhone, está no [guia de testes](../../docs/guia-de-testes.md).
 
 Em desenvolvimento, o servidor com `BATEPAPO_DEV_EXPOSE_OTP=true` devolve o código SMS e o app já o preenche.
 

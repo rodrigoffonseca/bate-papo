@@ -224,8 +224,14 @@ func (s *Server) logRequests(h http.Handler) http.Handler {
 
 func (s *Server) clientIP(r *http.Request) string {
 	if s.cfg.TrustProxyHeaders {
-		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-			return strings.TrimSpace(strings.Split(xff, ",")[0])
+		// O proxy acrescenta o IP de quem o chamou no fim da lista; o que vem
+		// antes foi enviado pelo próprio cliente e pode ser falso. Por isso
+		// vale o último item (um proxy confiável na frente do servidor).
+		if xff := r.Header.Values("X-Forwarded-For"); len(xff) > 0 {
+			parts := strings.Split(xff[len(xff)-1], ",")
+			if ip := strings.TrimSpace(parts[len(parts)-1]); ip != "" {
+				return ip
+			}
 		}
 	}
 	host, _, err := net.SplitHostPort(r.RemoteAddr)

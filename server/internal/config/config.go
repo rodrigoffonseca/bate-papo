@@ -9,7 +9,10 @@ import (
 	"net/url"
 	"os"
 	"strconv"
+	"strings"
 	"time"
+
+	"github.com/rodrigoffonseca/bate-papo/server/internal/phone"
 )
 
 type Config struct {
@@ -21,12 +24,16 @@ type Config struct {
 	// O servidor nunca armazena o número em texto claro.
 	PhonePepper []byte
 
-	SMSProvider   string // "console" ou "webhook"
+	SMSProvider   string // "console", "webhook" ou "none" (só números de teste)
 	SMSWebhookURL string
 	SMSWebhookKey string
 	// DevExposeOTP devolve o código OTP na resposta HTTP. Apenas para
 	// desenvolvimento e testes automatizados; proibido em produção.
 	DevExposeOTP bool
+
+	// TestPhones: números de teste com código fixo (E.164 → código), para
+	// testes fechados e para a revisão das lojas. Não recebem SMS.
+	TestPhones map[string]string
 
 	// TrustProxyHeaders usa X-Forwarded-For para identificar o IP do
 	// cliente. Ative apenas atrás de um proxy reverso confiável.
@@ -149,6 +156,16 @@ func Load() (*Config, error) {
 	if c.SMSProvider == "webhook" && c.SMSWebhookURL == "" {
 		return nil, errors.New("BATEPAPO_SMS_WEBHOOK_URL é obrigatório com BATEPAPO_SMS_PROVIDER=webhook")
 	}
+	switch c.SMSProvider {
+	case "console", "webhook", "none":
+	default:
+		return nil, fmt.Errorf("BATEPAPO_SMS_PROVIDER desconhecido: %q (use webhook, none ou console)", c.SMSProvider)
+	}
+	tp, err := parseTestPhones(os.Getenv("BATEPAPO_TEST_PHONES"))
+	if err != nil {
+		return nil, err
+	}
+	c.TestPhones = tp
 	return c, nil
 }
 
@@ -223,6 +240,48 @@ func (c *Config) loadPush() error {
 		return errors.New("BATEPAPO_PUSH_ALLOW_PRIVATE_ENDPOINTS não pode ser usado fora do ambiente de desenvolvimento")
 	}
 	return nil
+}
+
+// parseTestPhones lê "número=código, número=código". Os códigos têm 6
+// dígitos e não podem ser óbvios (000000, 123456…).
+func parseTestPhones(v string) (map[string]string, error) {
+	out := map[string]string{}
+	for _, item := range strings.Split(v, ",") {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		num, code, ok := strings.Cut(item, "=")
+		if !ok {
+			return nil, fmt.Errorf("BATEPAPO_TEST_PHONES: use número=código, veio %q", item)
+		}
+		e164, err := phone.Normalize(strings.TrimSpace(num))
+		if err != nil {
+			return nil, fmt.Errorf("BATEPAPO_TEST_PHONES: número inválido %q: %w", num, err)
+		}
+		code = strings.TrimSpace(code)
+		if !sixDigits(code) || obviousCode(code) {
+			return nil, fmt.Errorf("BATEPAPO_TEST_PHONES: o código de %s deve ter 6 dígitos e não ser óbvio", e164)
+		}
+		out[e164] = code
+	}
+	return out, nil
+}
+
+func sixDigits(s string) bool {
+	if len(s) != 6 {
+		return false
+	}
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+func obviousCode(s string) bool {
+	return strings.Count(s, s[:1]) == len(s) || strings.Contains("01234567890", s) || strings.Contains("09876543210", s)
 }
 
 func isLoopback(host string) bool {
