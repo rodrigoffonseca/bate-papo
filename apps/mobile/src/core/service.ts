@@ -9,6 +9,8 @@ import {
   AttachmentExpiredError,
   type MediaKind,
   BatePapoClient,
+  type PushKind,
+  PushUnavailableError,
   type FetchLike,
   type Group,
   KeyValueStorage,
@@ -28,6 +30,7 @@ import {
   groupConversationId,
 } from './history';
 import { type MediaStore, extensionFor, mediaKey } from './media';
+import { type VerificationState, parseSafetyQr } from './safety';
 import { SqlKV } from './kv';
 import { type Sql, migrate } from './sql';
 
@@ -53,6 +56,26 @@ export interface AppState {
   signedOutReason: 'session-ended' | null;
   /** Limpeza automática de mídia: apaga do aparelho o que tiver mais de N dias (0 = desligada). */
   autoCleanupDays: number;
+  /** Muda quando alguma verificação de contato muda (para as telas atualizarem). */
+  verificationVersion: number;
+  /**
+   * Notificações:
+   * - on: ligadas (o aviso não mostra o texto nem quem enviou);
+   * - off: desligadas pela pessoa;
+   * - denied: bloqueadas nos ajustes do celular;
+   * - unavailable: o servidor (ou esta versão do app) não envia notificações.
+   */
+  notifications: NotificationsState;
+}
+
+export type NotificationsState = 'on' | 'off' | 'denied' | 'unavailable';
+
+/** Notificações do sistema (no app, expo-notifications; nos testes, um substituto). */
+export interface PushPlatform {
+  /** Pede permissão, se preciso, e devolve o token deste aparelho; null se a pessoa negou. */
+  getToken(): Promise<{ kind: PushKind; token: string } | null>;
+  /** Avisa quando o sistema troca o token. */
+  onTokenChange?(fn: (t: { kind: PushKind; token: string }) => void): () => void;
 }
 
 export interface ServiceDeps {
@@ -63,6 +86,8 @@ export interface ServiceDeps {
   fetch?: FetchLike;
   /** Relógio (substituível nos testes). */
   now?: () => number;
+  /** Notificações push (ausente = indisponível). */
+  push?: PushPlatform;
 }
 
 /** Limites de tamanho por tipo, antes de cifrar (o servidor aceita até 64 MiB). */
@@ -120,11 +145,17 @@ const INITIAL: AppState = {
   pinReminderDue: false,
   signedOutReason: null,
   autoCleanupDays: 0,
+  verificationVersion: 0,
+  notifications: 'off',
 };
 
 /** Opções oferecidas na tela de armazenamento (0 = desligada). */
 export const AUTO_CLEANUP_OPTIONS = [0, 30, 90, 365] as const;
 const AUTO_CLEANUP_KEY = 'app:auto-cleanup-days';
+/** A pessoa desligou as notificações neste aparelho. */
+const NOTIFICATIONS_OFF_KEY = 'app:notifications-off';
+/** Chave de identidade do contato no momento em que foi verificado. */
+const VERIFIED_KEY = 'app:verified:';
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 export interface CleanupResult {
@@ -144,6 +175,7 @@ export class AppService {
   private readonly listeners = new Set<() => void>();
   private activeConversation: string | null = null;
   private unsubscribers: (() => void)[] = [];
+  private stopTokenListener: (() => void) | null = null;
   private readonly now: () => number;
   /** Atualizações de grupo uma de cada vez, para não registrar a mesma mudança duas vezes. */
   private groupQueue: Promise<unknown> = Promise.resolve();
@@ -247,7 +279,55 @@ export class AppService {
     if (!me?.username) return this.set({ phase: 'needs-profile' });
     if (!pinEnabled) return this.set({ phase: 'needs-pin' });
     const checked = Number((await this.kv.get(PIN_CHECKED_KEY)) ?? 0);
+    const wasReady = this.state.phase === 'ready';
     this.set({ phase: 'ready', pinReminderDue: this.now() - checked > PIN_REMINDER_MS });
+    if (!wasReady) void this.syncNotifications();
+  }
+
+  // ---- notificações ----
+
+  /** Liga ou desliga as notificações deste aparelho. */
+  async setNotifications(enabled: boolean): Promise<NotificationsState> {
+    if (enabled) {
+      await this.kv.delete(NOTIFICATIONS_OFF_KEY);
+      return this.syncNotifications();
+    }
+    await this.kv.set(NOTIFICATIONS_OFF_KEY, 'true');
+    this.stopTokenListener?.();
+    this.stopTokenListener = null;
+    this.set({ notifications: 'off' });
+    await this.client.unregisterPush().catch(() => undefined);
+    return 'off';
+  }
+
+  /**
+   * Registra no servidor o token de push deste aparelho (a menos que a pessoa
+   * tenha desligado as notificações). Chamado ao entrar no app.
+   */
+  private async syncNotifications(): Promise<NotificationsState> {
+    let state: NotificationsState;
+    if (!this.deps.push) state = 'unavailable';
+    else if (await this.kv.get(NOTIFICATIONS_OFF_KEY)) state = 'off';
+    else {
+      try {
+        const t = await this.deps.push.getToken();
+        if (!t) state = 'denied';
+        else {
+          await this.client.registerPush(t.kind, t.token);
+          state = 'on';
+          this.stopTokenListener ??=
+            this.deps.push.onTokenChange?.((n) => void this.client.registerPush(n.kind, n.token).catch(() => undefined)) ??
+            null;
+        }
+      } catch (err) {
+        // Sem rede, o estado atual continua; tenta de novo na próxima entrada.
+        if (err instanceof PushUnavailableError) state = 'unavailable';
+        else if (err instanceof ApiError || isNetworkError(err)) state = this.state.notifications;
+        else state = 'unavailable'; // ex.: Firebase não configurado nesta versão do app
+      }
+    }
+    this.set({ notifications: state });
+    return state;
   }
 
   /** Para quando o app vai para segundo plano. */
@@ -358,6 +438,8 @@ export class AppService {
 
   private async wipe(reason: AppState['signedOutReason']): Promise<void> {
     this.client.disconnect();
+    this.stopTokenListener?.();
+    this.stopTokenListener = null;
     await this.storage.clear();
     await this.history.clear();
     await this.deps.media.clear();
@@ -680,12 +762,54 @@ export class AppService {
     }
   }
 
-  /** Número de segurança da conversa com um contato. */
+  // ---- número de segurança ----
+
+  /** Número de segurança da conversa com um contato (undefined se nunca conversaram). */
   safetyNumber(peerId: string) {
     return this.client.safetyNumber(peerId);
+  }
+
+  /** Se o contato foi verificado, e se a chave dele continua a mesma desde então. */
+  async verificationState(peerId: string): Promise<VerificationState> {
+    const verified = await this.kv.get(VERIFIED_KEY + peerId);
+    if (!verified) return 'unverified';
+    const current = await this.client.identityKey(peerId);
+    return current && toBase64(current) === verified ? 'verified' : 'changed';
+  }
+
+  /**
+   * Marca (ou desmarca) o contato como verificado. A marca vale para a chave
+   * atual: se ela mudar, o estado passa a 'changed'.
+   */
+  async setVerified(peerId: string, verified: boolean): Promise<void> {
+    if (!verified) {
+      await this.kv.delete(VERIFIED_KEY + peerId);
+    } else {
+      const key = await this.client.identityKey(peerId);
+      if (!key) throw new Error('Troque ao menos uma mensagem com a pessoa antes de verificar');
+      await this.kv.set(VERIFIED_KEY + peerId, toBase64(key));
+    }
+    this.set({ verificationVersion: this.state.verificationVersion + 1 });
+  }
+
+  /**
+   * Confere o QR code lido do celular da outra pessoa. Se o número bater, o
+   * contato fica verificado.
+   */
+  async verifyScannedCode(peerId: string, data: string): Promise<'match' | 'mismatch' | 'invalid'> {
+    const scanned = parseSafetyQr(data);
+    if (!scanned) return 'invalid';
+    const mine = await this.client.safetyNumber(peerId);
+    if (!mine || mine !== scanned) return 'mismatch';
+    await this.setVerified(peerId, true);
+    return 'match';
   }
 }
 
 function toContact(u: User): Contact {
   return { id: u.id, username: u.username, displayName: u.display_name };
+}
+
+function isNetworkError(err: unknown): boolean {
+  return err instanceof TypeError || (err instanceof Error && /network|fetch|sem rede/i.test(err.message));
 }

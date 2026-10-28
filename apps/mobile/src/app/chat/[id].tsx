@@ -7,7 +7,7 @@ import { errorMessage, formatTime } from '@/components/format';
 import { ImageContent, VideoContent, VoiceContent, formatDuration } from '@/components/media';
 import { Banner, Screen, Txt } from '@/components/ui';
 import type { Message } from '@/core/history';
-import { useAppState, useHistoryQuery, useService } from '@/platform/app';
+import { useAppState, useHistoryQuery, useService, useVerificationState } from '@/platform/app';
 import { pickFromGallery, prepareAsset, takeWithCamera } from '@/platform/pick-media';
 import { useVoiceRecorder } from '@/platform/voice';
 import { spacing, useTheme } from '@/theme';
@@ -159,6 +159,8 @@ export default function Chat() {
   const conversation = useHistoryQuery((h) => h.getConversation(id), [id]);
   const messages = useHistoryQuery((h) => h.listMessages(id), [id]);
   const groupId = conversation?.kind === 'group' ? conversation.peerId : null;
+  const directPeer = conversation?.kind === 'direct' ? conversation.peerId : null;
+  const verification = useVerificationState(directPeer);
   const group = useHistoryQuery((h) => (groupId ? h.getGroup(groupId) : Promise.resolve(null)), [groupId]);
 
   useFocusEffect(
@@ -229,16 +231,32 @@ export default function Chat() {
       <Stack.Screen
         options={{
           title: conversation?.title ?? '',
-          headerRight: groupId
-            ? () => (
-                <Link href={{ pathname: '/grupo/[id]', params: { id: groupId } }} accessibilityLabel="Dados do grupo">
-                  <Txt style={{ color: t.primary, fontSize: 22 }}>ⓘ</Txt>
-                </Link>
-              )
-            : undefined,
+          headerRight: () =>
+            groupId ? (
+              <Link href={{ pathname: '/grupo/[id]', params: { id: groupId } }} accessibilityLabel="Dados do grupo">
+                <Txt style={{ color: t.primary, fontSize: 22 }}>ⓘ</Txt>
+              </Link>
+            ) : directPeer ? (
+              <Link
+                href={{ pathname: '/contato/[id]', params: { id: directPeer } }}
+                accessibilityLabel={verification === 'verified' ? 'Contato verificado. Dados do contato' : 'Dados do contato'}
+              >
+                <Txt style={{ color: t.primary, fontSize: 22 }}>{verification === 'verified' ? '✅' : 'ⓘ'}</Txt>
+              </Link>
+            ) : null,
         }}
       />
-      {keyChangedFor && (
+      {verification === 'changed' && directPeer && (
+        <Link href={{ pathname: '/contato/[id]', params: { id: directPeer } }} asChild>
+          <Pressable accessibilityRole="button">
+            <Banner>
+              ⚠️ Você tinha verificado {conversation?.title}, mas a chave de segurança mudou. Toque para conferir de
+              novo o número de segurança antes de trocar informações sensíveis.
+            </Banner>
+          </Pressable>
+        </Link>
+      )}
+      {keyChangedFor && verification !== 'changed' && (
         <Banner>
           A chave de segurança de {keyChangedFor} mudou. Isso acontece quando a pessoa reinstala o app ou troca de
           celular.

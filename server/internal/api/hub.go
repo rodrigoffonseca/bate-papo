@@ -72,6 +72,13 @@ func (h *Hub) NotifyGroup(user uuid.UUID, groupID uuid.UUID) {
 	h.send(user, wsMessage{"type": "group", "group_id": groupID})
 }
 
+// Connected diz se o usuário tem o app aberto (WebSocket conectado).
+func (h *Hub) Connected(user uuid.UUID) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return len(h.conns[user]) > 0
+}
+
 func (h *Hub) send(user uuid.UUID, msg wsMessage) {
 	h.mu.Lock()
 	defer h.mu.Unlock()

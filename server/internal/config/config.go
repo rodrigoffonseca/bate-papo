@@ -47,6 +47,25 @@ type Config struct {
 	PinKeyProvider string
 	PinPepper      []byte
 	OpenBao        OpenBaoConfig
+
+	// Notificações push sem conteúdo.
+	Push PushConfig
+}
+
+type PushConfig struct {
+	// Arquivo JSON da conta de serviço do Firebase (Android). Vazio = sem FCM.
+	FCMCredentialsFile string
+	// Chave .p8 da Apple (iOS). Vazio = sem APNs.
+	APNsKeyFile string
+	APNsKeyID   string
+	APNsTeamID  string
+	APNsTopic   string
+	APNsSandbox bool
+	// UnifiedPush: distribuidor escolhido pela pessoa, sem Google/Apple.
+	UnifiedPush bool
+	// AllowPrivateEndpoints libera endereços UnifiedPush internos e http.
+	// Apenas desenvolvimento e testes.
+	AllowPrivateEndpoints bool
 }
 
 type OpenBaoConfig struct {
@@ -115,6 +134,9 @@ func Load() (*Config, error) {
 	if err := c.loadPinKey(); err != nil {
 		return nil, err
 	}
+	if err := c.loadPush(); err != nil {
+		return nil, err
+	}
 
 	if c.Env != "development" {
 		if c.DevExposeOTP {
@@ -178,6 +200,27 @@ func (c *Config) loadPinKey() error {
 		}
 	default:
 		return fmt.Errorf("BATEPAPO_PIN_KEY_PROVIDER desconhecido: %q (use local ou openbao)", c.PinKeyProvider)
+	}
+	return nil
+}
+
+func (c *Config) loadPush() error {
+	c.Push = PushConfig{
+		FCMCredentialsFile:    os.Getenv("BATEPAPO_PUSH_FCM_CREDENTIALS_FILE"),
+		APNsKeyFile:           os.Getenv("BATEPAPO_PUSH_APNS_KEY_FILE"),
+		APNsKeyID:             os.Getenv("BATEPAPO_PUSH_APNS_KEY_ID"),
+		APNsTeamID:            os.Getenv("BATEPAPO_PUSH_APNS_TEAM_ID"),
+		APNsTopic:             os.Getenv("BATEPAPO_PUSH_APNS_TOPIC"),
+		APNsSandbox:           os.Getenv("BATEPAPO_PUSH_APNS_SANDBOX") == "true",
+		UnifiedPush:           env("BATEPAPO_PUSH_UNIFIEDPUSH", "true") == "true",
+		AllowPrivateEndpoints: os.Getenv("BATEPAPO_PUSH_ALLOW_PRIVATE_ENDPOINTS") == "true",
+	}
+	p := c.Push
+	if p.APNsKeyFile != "" && (p.APNsKeyID == "" || p.APNsTeamID == "" || p.APNsTopic == "") {
+		return errors.New("com BATEPAPO_PUSH_APNS_KEY_FILE, defina também BATEPAPO_PUSH_APNS_KEY_ID, _TEAM_ID e _TOPIC")
+	}
+	if p.AllowPrivateEndpoints && c.Env != "development" {
+		return errors.New("BATEPAPO_PUSH_ALLOW_PRIVATE_ENDPOINTS não pode ser usado fora do ambiente de desenvolvimento")
 	}
 	return nil
 }

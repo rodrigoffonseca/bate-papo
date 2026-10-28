@@ -108,6 +108,8 @@ func (s *Store) RegisterDevice(ctx context.Context, phoneHash, tokenHash []byte)
 				`DELETE FROM one_time_prekeys WHERE user_id = $1`,
 				`DELETE FROM envelopes WHERE recipient_id = $1`,
 				`DELETE FROM unlock_challenges WHERE user_id = $1`,
+				// O aparelho antigo não deve mais ser acordado.
+				`DELETE FROM push_tokens WHERE user_id = $1`,
 			} {
 				if _, err := tx.Exec(ctx, q, u.ID); err != nil {
 					return err

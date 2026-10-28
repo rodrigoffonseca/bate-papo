@@ -11,6 +11,7 @@ import (
 	"github.com/coder/websocket/wsjson"
 	"github.com/google/uuid"
 
+	"github.com/rodrigoffonseca/bate-papo/server/internal/push"
 	"github.com/rodrigoffonseca/bate-papo/server/internal/store"
 )
 
@@ -93,6 +94,7 @@ func (s *Server) deliver(w http.ResponseWriter, r *http.Request, sender uuid.UUI
 	res := make([]sentResult, len(envs))
 	for i, e := range envs {
 		s.hub.Notify(e.RecipientID, e)
+		s.wake(e.RecipientID, push.Message)
 		res[i] = sentResult{ID: e.ID, To: e.RecipientID, ServerTimestamp: e.CreatedAt}
 	}
 	writeJSON(w, http.StatusCreated, map[string]any{"messages": res})
@@ -171,6 +173,7 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	conn.SetReadLimit(64 << 10)
 
 	sub := s.hub.Subscribe(me.ID)
+	s.pusher.reset(me.ID)
 	defer s.hub.Unsubscribe(me.ID, sub)
 
 	ctx, cancel := context.WithCancel(r.Context())

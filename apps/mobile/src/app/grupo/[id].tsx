@@ -49,39 +49,7 @@ export default function Grupo() {
 
   const memberOptions = (m: GroupMemberInfo) => {
     if (m.userId === me?.id) return;
-    const options: {
-      text: string;
-      style?: 'destructive' | 'cancel';
-      onPress?: () => void;
-    }[] = [
-      {
-        text: 'Conversar',
-        onPress: () =>
-          void service
-            .openDirectConversation(m.userId)
-            .then((cid) => router.dismissTo({ pathname: '/chat/[id]', params: { id: cid } })),
-      },
-    ];
-    if (iAmAdmin) {
-      options.push(
-        m.role === 'admin'
-          ? {
-              text: 'Remover de administrador',
-              onPress: () => void run(() => service.setGroupAdmin(group.id, m.userId, false)),
-            }
-          : {
-              text: 'Tornar administrador',
-              onPress: () => void run(() => service.setGroupAdmin(group.id, m.userId, true)),
-            },
-        {
-          text: 'Remover do grupo',
-          style: 'destructive',
-          onPress: () => void run(() => service.removeGroupMember(group.id, m.userId)),
-        },
-      );
-    }
-    options.push({ text: 'Cancelar', style: 'cancel' });
-    Alert.alert(m.name, undefined, options);
+    router.push({ pathname: '/contato/[id]', params: { id: m.userId, grupo: group.id } });
   };
 
   const leave = () =>

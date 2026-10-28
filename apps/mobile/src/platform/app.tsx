@@ -5,11 +5,13 @@ import { AppState as RNAppState } from 'react-native';
 import type { FetchLike } from '@bate-papo/client';
 
 import type { History } from '@/core/history';
+import type { VerificationState } from '@/core/safety';
 import { type AppState, AppService } from '@/core/service';
 
 import { SERVER_URL } from './config';
 import { openEncryptedDatabase } from './db';
 import { deviceMediaStore } from './media';
+import { devicePush } from './push';
 
 const ServiceContext = createContext<AppService | null>(null);
 
@@ -27,6 +29,7 @@ function startService(): Promise<AppService> {
       media: deviceMediaStore,
       serverUrl: SERVER_URL,
       fetch: expoFetchLike,
+      push: devicePush,
     });
     await service.init();
     return service;
@@ -83,4 +86,20 @@ export function useHistoryQuery<T>(query: (h: History) => Promise<T>, deps: unkn
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [history, ...deps]);
   return value;
+}
+
+/** Estado de verificação do contato (null = não se aplica). */
+export function useVerificationState(peerId: string | null): VerificationState | undefined {
+  const service = useService();
+  const { verificationVersion, identityAlert } = useAppState();
+  const [state, setState] = useState<VerificationState>();
+  useEffect(() => {
+    if (!peerId) return;
+    let alive = true;
+    service.verificationState(peerId).then((v) => alive && setState(v), () => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [service, peerId, verificationVersion, identityAlert?.at]);
+  return peerId ? state : undefined;
 }

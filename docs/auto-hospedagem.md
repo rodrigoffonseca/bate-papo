@@ -30,7 +30,16 @@ Todas as opções são variáveis de ambiente (veja [.env.example](../.env.examp
 | `BATEPAPO_PIN_PEPPER` | — | Com `local`, **obrigatório em produção**: 32 bytes em hex (`openssl rand -hex 32`), diferente de `BATEPAPO_PHONE_PEPPER` |
 | `BATEPAPO_OPENBAO_ADDR` / `_TOKEN` ou `_TOKEN_FILE` | — | Com `openbao`: endereço (https) e token com permissão só de `hmac`/`verify` na chave do PIN. O arquivo do token é relido a cada uso |
 | `BATEPAPO_OPENBAO_MOUNT` / `_KEY` | `transit` / `batepapo-pin` | Com `openbao`: onde está o motor Transit e o nome da chave |
+| `BATEPAPO_PUSH_FCM_CREDENTIALS_FILE` | — | Notificações no Android: JSON da conta de serviço do Firebase (com permissão só de enviar mensagens) |
+| `BATEPAPO_PUSH_APNS_KEY_FILE` / `_KEY_ID` / `_TEAM_ID` / `_TOPIC` | — | Notificações no iOS: chave `.p8` da Apple, seus IDs e o bundle id do app. `BATEPAPO_PUSH_APNS_SANDBOX=true` para builds de desenvolvimento |
+| `BATEPAPO_PUSH_UNIFIEDPUSH` | `true` | Aceita UnifiedPush (distribuidor escolhido pela pessoa, sem Google/Apple) |
 | `BATEPAPO_LOCK_INACTIVITY_DAYS` | `7` | Depois desse tempo sem uso do aparelho registrado, o PIN deixa de ser exigido (recuperação para quem perdeu tudo). Veja [seguranca-da-conta.md](seguranca-da-conta.md) |
+
+### Notificações push
+
+As notificações nunca levam conteúdo, remetente ou grupo: só "Você tem novas mensagens" ou "Alerta de segurança na sua conta". O app abre, conecta e busca as mensagens, cifradas de ponta a ponta. Google e Apple ficam sabendo apenas que chegou algo para aquele aparelho, e quando.
+
+Sem FCM nem APNs configurados, o servidor funciona normalmente: as mensagens aparecem quando a pessoa abre o app. Para Android sem Google, o servidor aceita UnifiedPush (ex.: ntfy auto-hospedado); o suporte no app está no roteiro.
 
 ### Webhook de SMS
 

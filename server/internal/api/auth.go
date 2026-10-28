@@ -158,5 +158,10 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 		s.internalError(w, r, err)
 		return
 	}
+	// Um aparelho por conta: depois de sair, ele não recebe mais avisos.
+	if err := s.store.DeletePushToken(r.Context(), currentUser(r).ID, ""); err != nil {
+		s.internalError(w, r, err)
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
 }

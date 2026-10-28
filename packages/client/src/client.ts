@@ -28,6 +28,7 @@ import {
   type FetchLike,
   type Group,
   type OutgoingMessage,
+  type PushKind,
   type User,
   parseEnvelope,
 } from './api.js';
@@ -120,6 +121,14 @@ export interface MediaMeta {
   durationMs?: number;
   /** Miniatura JPEG pequena em base64 (até MAX_THUMBNAIL_CHARS). */
   thumbnail?: string;
+}
+
+/** O servidor não envia notificações por esse tipo (ex.: FCM não configurado). */
+export class PushUnavailableError extends Error {
+  constructor(readonly kind: PushKind) {
+    super(`este servidor não envia notificações por ${kind}`);
+    this.name = 'PushUnavailableError';
+  }
 }
 
 export class IdentityChangedError extends Error {
@@ -382,6 +391,26 @@ export class BatePapoClient {
     return this.api.ackAlerts(ids);
   }
 
+  // ---- notificações ----
+
+  /**
+   * Registra o token de push deste aparelho. As notificações não levam
+   * conteúdo: só "você tem novas mensagens" ou "alerta de segurança".
+   * Lança PushUnavailableError se o servidor não envia por esse tipo.
+   */
+  async registerPush(kind: PushKind, token: string): Promise<void> {
+    try {
+      await this.api.setPush(kind, token);
+    } catch (err) {
+      if (err instanceof ApiError && err.body.code === 'push_unavailable') throw new PushUnavailableError(kind);
+      throw err;
+    }
+  }
+
+  unregisterPush() {
+    return this.api.deletePush();
+  }
+
   // ---- segurança das conversas ----
 
   /** Número de segurança (60 dígitos) da conversa com um contato. */
@@ -390,6 +419,11 @@ export class BatePapoClient {
     if (!remote) return undefined;
     const local = await this.storage.getIdentityKeyPair();
     return safetyNumber(local.publicKey, this.currentUserId, remote, userId);
+  }
+
+  /** Chave de identidade em que este aparelho confia para o contato (se já houve conversa). */
+  identityKey(userId: string): Promise<Uint8Array | undefined> {
+    return this.storage.getTrustedIdentity(userId);
   }
 
   /** Aceita explicitamente uma nova chave de identidade de um contato. */

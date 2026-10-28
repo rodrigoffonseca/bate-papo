@@ -16,6 +16,7 @@ import (
 	"github.com/rodrigoffonseca/bate-papo/server/internal/blob"
 	"github.com/rodrigoffonseca/bate-papo/server/internal/config"
 	"github.com/rodrigoffonseca/bate-papo/server/internal/pepper"
+	"github.com/rodrigoffonseca/bate-papo/server/internal/push"
 	"github.com/rodrigoffonseca/bate-papo/server/internal/sms"
 	"github.com/rodrigoffonseca/bate-papo/server/internal/store"
 )
@@ -71,6 +72,12 @@ func run(log *slog.Logger) error {
 	log.Info("chave secreta do PIN configurada", "provider", cfg.PinKeyProvider, "id", pinKeyer.ID())
 
 	srv := api.New(cfg, st, blobs, sender, pinKeyer, log)
+	pusher, err := newPusher(cfg)
+	if err != nil {
+		return err
+	}
+	srv.SetPush(pusher)
+	log.Info("notificações push", "servicos", pusher.Kinds())
 	go srv.RunJanitor(ctx, time.Hour)
 
 	httpSrv := &http.Server{
@@ -113,4 +120,30 @@ func newPinKeyer(ctx context.Context, cfg *config.Config) (pepper.Keyer, error) 
 		return nil, fmt.Errorf("testando o OpenBao: %w", err)
 	}
 	return t, nil
+}
+
+// newPusher prepara os serviços de push configurados.
+func newPusher(cfg *config.Config) (*push.Dispatcher, error) {
+	d := push.NewDispatcher()
+	p := cfg.Push
+	if p.FCMCredentialsFile != "" {
+		f, err := push.NewFCMFromFile(p.FCMCredentialsFile)
+		if err != nil {
+			return nil, err
+		}
+		d.Add(push.KindFCM, f)
+	}
+	if p.APNsKeyFile != "" {
+		a, err := push.NewAPNs(push.APNsConfig{
+			KeyFile: p.APNsKeyFile, KeyID: p.APNsKeyID, TeamID: p.APNsTeamID, Topic: p.APNsTopic, Sandbox: p.APNsSandbox,
+		})
+		if err != nil {
+			return nil, err
+		}
+		d.Add(push.KindAPNs, a)
+	}
+	if p.UnifiedPush {
+		d.Add(push.KindUnifiedPush, push.NewUnifiedPush(p.AllowPrivateEndpoints))
+	}
+	return d, nil
 }

@@ -1,17 +1,25 @@
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
-import { Alert, ScrollView, View } from 'react-native';
+import { Alert, Linking, ScrollView, Switch, View } from 'react-native';
 
 import { errorMessage } from '@/components/format';
 import { Avatar, Button, Screen, Title, Txt } from '@/components/ui';
+import type { NotificationsState } from '@/core/service';
 import { useAppState, useService } from '@/platform/app';
 import { SERVER_URL } from '@/platform/config';
 import { spacing, useTheme } from '@/theme';
 
+const NOTIFICATIONS_TEXT: Record<NotificationsState, string> = {
+  on: 'Você é avisado quando chega mensagem com o app fechado. O aviso diz só "Você tem novas mensagens": nem o texto, nem quem enviou passam pelo Google ou pela Apple.',
+  off: 'Desligadas. As mensagens aparecem quando você abrir o app.',
+  denied: 'Bloqueadas nos ajustes do celular. Libere as notificações do Bate-Papo para ser avisado de mensagens novas.',
+  unavailable: 'Este servidor ou esta versão do app não envia notificações. As mensagens aparecem quando você abrir o app.',
+};
+
 export default function Ajustes() {
   const service = useService();
   const router = useRouter();
-  const { me } = useAppState();
+  const { me, notifications } = useAppState();
   const t = useTheme();
   const [busy, setBusy] = useState(false);
   const name = me?.display_name ?? me?.username ?? '';
@@ -50,6 +58,24 @@ export default function Ajustes() {
             ela é entregue.
           </Txt>
           <Txt muted style={{ fontSize: 12 }}>Servidor: {SERVER_URL}</Txt>
+        </View>
+
+        <View style={{ backgroundColor: t.surface, borderRadius: 12, padding: spacing.md, gap: spacing.sm }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+            <Txt style={{ fontWeight: '600' }}>🔔 Notificações</Txt>
+            <Switch
+              accessibilityLabel="Notificações"
+              value={notifications === 'on'}
+              disabled={notifications === 'unavailable'}
+              onValueChange={(on) => void service.setNotifications(on).catch(() => undefined)}
+            />
+          </View>
+          <Txt muted style={{ fontSize: 14 }}>
+            {NOTIFICATIONS_TEXT[notifications]}
+          </Txt>
+          {notifications === 'denied' && (
+            <Button variant="ghost" title="Abrir ajustes do celular" onPress={() => void Linking.openSettings()} />
+          )}
         </View>
 
         <View style={{ backgroundColor: t.surface, borderRadius: 12, padding: spacing.md, gap: spacing.sm }}>

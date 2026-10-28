@@ -87,3 +87,29 @@ func TestDevelopmentDefaults(t *testing.T) {
 		t.Fatal("o padrão de desenvolvimento deve ter chave do PIN própria")
 	}
 }
+
+func TestPushConfig(t *testing.T) {
+	production(t)
+	c, err := Load()
+	if err != nil || !c.Push.UnifiedPush || c.Push.FCMCredentialsFile != "" || c.Push.APNsKeyFile != "" {
+		t.Fatalf("padrão inesperado: %+v %v", c.Push, err)
+	}
+
+	t.Setenv("BATEPAPO_PUSH_ALLOW_PRIVATE_ENDPOINTS", "true")
+	expectErr(t, "BATEPAPO_PUSH_ALLOW_PRIVATE_ENDPOINTS")
+	t.Setenv("BATEPAPO_PUSH_ALLOW_PRIVATE_ENDPOINTS", "")
+
+	t.Setenv("BATEPAPO_PUSH_APNS_KEY_FILE", "/etc/batepapo/apns.p8")
+	expectErr(t, "BATEPAPO_PUSH_APNS_KEY_ID")
+	t.Setenv("BATEPAPO_PUSH_APNS_KEY_ID", "KEY123")
+	t.Setenv("BATEPAPO_PUSH_APNS_TEAM_ID", "TEAM456")
+	t.Setenv("BATEPAPO_PUSH_APNS_TOPIC", "br.org.batepapo")
+	if c, err = Load(); err != nil || c.Push.APNsTopic != "br.org.batepapo" {
+		t.Fatalf("APNs completo recusado: %v", err)
+	}
+
+	t.Setenv("BATEPAPO_PUSH_UNIFIEDPUSH", "false")
+	if c, _ = Load(); c.Push.UnifiedPush {
+		t.Fatal("UnifiedPush deveria estar desligado")
+	}
+}

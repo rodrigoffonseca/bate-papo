@@ -54,6 +54,19 @@
         {
           "microphonePermission": "O Bate-Papo usa o microfone para gravar mensagens de voz, enviadas com criptografia de ponta a ponta."
         }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "O Bate-Papo usa a câmera para ler o código QR do número de segurança, tirar fotos e gravar vídeos.",
+          "barcodeScannerEnabled": true
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "color": "#128C4A"
+        }
       ]
     ],
     "experiments": {
