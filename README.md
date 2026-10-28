@@ -45,6 +45,8 @@ O Bate-Papo é um aplicativo de mensagens no estilo WhatsApp, pensado para o Bra
 - [`packages/client/`](packages/client/) — `@bate-papo/client`: SDK em TypeScript usado pelos apps (cadastro, envio, recebimento, grupos).
 - [`apps/mobile/`](apps/mobile/) — app Android/iOS em React Native (Expo), com histórico cifrado no aparelho (SQLCipher + Keychain/Keystore).
 
+Para colocar um servidor na nuvem e distribuir o app a outras pessoas, veja o [guia de testes](docs/guia-de-testes.md) (Azure, Android e iPhone).
+
 Detalhes em [docs/arquitetura-funcional.md](docs/arquitetura-funcional.md) (capacidades, fluxos e infraestrutura de operação), [docs/arquitetura.md](docs/arquitetura.md), [docs/seguranca.md](docs/seguranca.md) e [docs/api.md](docs/api.md).
 
 ## Rodando localmente

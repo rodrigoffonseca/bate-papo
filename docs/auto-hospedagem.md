@@ -19,9 +19,10 @@ Todas as opções são variáveis de ambiente (veja [.env.example](../.env.examp
 | `BATEPAPO_LISTEN_ADDR` | `:8080` | Endereço HTTP |
 | `BATEPAPO_DATABASE_URL` | `postgres://batepapo:batepapo@localhost:5432/batepapo` | Conexão com o PostgreSQL |
 | `BATEPAPO_PHONE_PEPPER` | — | **Obrigatório em produção.** 32 bytes em hex (`openssl rand -hex 32`). Faça backup seguro: sem ele, ninguém consegue entrar pelo número |
-| `BATEPAPO_SMS_PROVIDER` | `console` | `webhook` em produção |
+| `BATEPAPO_SMS_PROVIDER` | `console` | `webhook` em produção, ou `none` para um teste fechado (só os números de teste se cadastram) |
+| `BATEPAPO_TEST_PHONES` | — | Números de teste com código fixo, sem SMS: `+5511999990001=482915,+5511999990002=739204`. Códigos de 6 dígitos, não óbvios. Para testes fechados e para a revisão das lojas; entregue cada par a uma só pessoa. Veja [guia-de-testes.md](guia-de-testes.md) |
 | `BATEPAPO_SMS_WEBHOOK_URL` / `_KEY` | — | Serviço que envia o SMS (veja abaixo) |
-| `BATEPAPO_TRUST_PROXY_HEADERS` | `false` | `true` atrás de proxy reverso, para limitar por IP real |
+| `BATEPAPO_TRUST_PROXY_HEADERS` | `false` | `true` atrás de **um** proxy reverso confiável, para limitar por IP real. Vale o último IP de `X-Forwarded-For` (o que o proxy acrescenta); os anteriores podem ser forjados pelo cliente |
 | `BATEPAPO_BLOB_DIR` | `./data/blobs` | Onde guardar anexos cifrados |
 | `BATEPAPO_MAX_ATTACHMENT_BYTES` | 64 MiB | Tamanho máximo de anexo (o app limita vídeos a 60 MB e 3 minutos) |
 | `BATEPAPO_RETENTION_DAYS` | `30` | Validade de mensagens não entregues, anexos e alertas de segurança |

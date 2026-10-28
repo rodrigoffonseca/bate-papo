@@ -61,6 +61,9 @@ func run(log *slog.Logger) error {
 		sender = sms.Console{Log: log}
 	case "webhook":
 		sender = sms.Webhook{URL: cfg.SMSWebhookURL, Key: cfg.SMSWebhookKey}
+	case "none":
+		// Teste fechado: só os números de BATEPAPO_TEST_PHONES se cadastram.
+		log.Warn("sem provedor de SMS: cadastro restrito aos números de teste", "numeros", len(cfg.TestPhones))
 	default:
 		return errors.New("BATEPAPO_SMS_PROVIDER desconhecido: " + cfg.SMSProvider)
 	}
@@ -68,6 +71,9 @@ func run(log *slog.Logger) error {
 	pinKeyer, err := newPinKeyer(ctx, cfg)
 	if err != nil {
 		return err
+	}
+	if len(cfg.TestPhones) > 0 && cfg.SMSProvider != "none" {
+		log.Warn("números de teste ativos (código fixo, sem SMS)", "numeros", len(cfg.TestPhones))
 	}
 	log.Info("chave secreta do PIN configurada", "provider", cfg.PinKeyProvider, "id", pinKeyer.ID())
 

@@ -57,10 +57,22 @@ func (s *Server) handleRequestCode(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusTooManyRequests, "muitas solicitações para este número; tente mais tarde")
 		return
 	}
-	code, err := randomCode()
-	if err != nil {
-		s.internalError(w, r, err)
-		return
+	// Números de teste têm código fixo e não recebem SMS. Sem provedor de
+	// SMS (BATEPAPO_SMS_PROVIDER=none), só eles podem se cadastrar.
+	code, testPhone := s.cfg.TestPhones[e164]
+	if !testPhone {
+		if s.sms == nil {
+			writeJSON(w, http.StatusForbidden, map[string]any{
+				"error": "o cadastro neste servidor está restrito a números de teste",
+				"code":  "signup_closed",
+			})
+			return
+		}
+		var err error
+		if code, err = randomCode(); err != nil {
+			s.internalError(w, r, err)
+			return
+		}
 	}
 	err = s.store.PutOTP(r.Context(), ph, s.codeHash(ph, code), otpTTL, otpMinInterval)
 	if errors.Is(err, store.ErrTooSoon) {
@@ -71,10 +83,12 @@ func (s *Server) handleRequestCode(w http.ResponseWriter, r *http.Request) {
 		s.internalError(w, r, err)
 		return
 	}
-	if err := s.sms.SendCode(r.Context(), e164, code); err != nil {
-		s.log.Error("envio de SMS", "err", err)
-		writeError(w, http.StatusBadGateway, "não foi possível enviar o SMS")
-		return
+	if !testPhone {
+		if err := s.sms.SendCode(r.Context(), e164, code); err != nil {
+			s.log.Error("envio de SMS", "err", err)
+			writeError(w, http.StatusBadGateway, "não foi possível enviar o SMS")
+			return
+		}
 	}
 	resp := map[string]any{"expires_in": int(otpTTL.Seconds())}
 	if s.cfg.DevExposeOTP {

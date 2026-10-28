@@ -113,3 +113,23 @@ func TestPushConfig(t *testing.T) {
 		t.Fatal("UnifiedPush deveria estar desligado")
 	}
 }
+
+func TestTestPhones(t *testing.T) {
+	production(t)
+	t.Setenv("BATEPAPO_SMS_PROVIDER", "none")
+	t.Setenv("BATEPAPO_TEST_PHONES", "(11) 99999-0001=482915, +5521999990002=739204")
+	c, err := Load()
+	if err != nil {
+		t.Fatalf("teste fechado recusado: %v", err)
+	}
+	if c.TestPhones["+5511999990001"] != "482915" || c.TestPhones["+5521999990002"] != "739204" {
+		t.Fatalf("números de teste: %v", c.TestPhones)
+	}
+	for _, bad := range []string{"+5511999990001=123456", "+5511999990001=777777", "+5511999990001=12345", "+5511999990001", "123=482915"} {
+		t.Setenv("BATEPAPO_TEST_PHONES", bad)
+		expectErr(t, "BATEPAPO_TEST_PHONES")
+	}
+	t.Setenv("BATEPAPO_TEST_PHONES", "")
+	t.Setenv("BATEPAPO_SMS_PROVIDER", "pombo-correio")
+	expectErr(t, "desconhecido")
+}
