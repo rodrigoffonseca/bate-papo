@@ -47,7 +47,7 @@ flowchart LR
 
 ## Parte 1 — Servidor na Azure
 
-Todos os comandos são para um terminal bash (Linux, macOS, WSL ou o Cloud Shell da própria Azure), a partir da raiz do repositório.
+Todos os comandos são para um terminal bash: Linux, macOS, WSL ou o [Cloud Shell](https://shell.azure.com) da própria Azure. A Parte 1 não precisa do código no seu computador, porque a Azure busca o servidor direto do GitHub. Use **o mesmo terminal do começo ao fim**: os passos reaproveitam as variáveis definidas antes.
 
 ### 1.1 Nomes e segredos
 
@@ -117,12 +117,16 @@ O servidor cria as tabelas sozinho na primeira inicialização (migrações).
 
 ### 1.4 Imagem do servidor
 
-O próprio registro da Azure compila a imagem a partir do `server/Dockerfile`, sem precisar de Docker na sua máquina:
+O próprio registro da Azure baixa o código do GitHub e compila a imagem a partir do `server/Dockerfile`, sem precisar de Docker nem do código na sua máquina:
 
 ```bash
+REPO=https://github.com/rodrigoffonseca/bate-papo.git   # ou o seu fork
+
 az acr create --resource-group $RG --name $ACR --sku Basic
-az acr build --registry $ACR --image batepapo-server:v1 ./server
+az acr build --registry $ACR --image batepapo-server:v1 "$REPO#main:server"
 ```
+
+`#main:server` quer dizer: ramo `main`, pasta `server`. Se preferir compilar uma cópia local (por exemplo, com alterações suas), rode a partir da raiz do repositório clonado: `az acr build --registry $ACR --image batepapo-server:v1 ./server`.
 
 ### 1.5 Armazenamento dos anexos (Azure Files)
 
@@ -231,7 +235,7 @@ az containerapp logs show --resource-group $RG --name $APP --follow   # logs do 
 A cada nova versão do código:
 
 ```bash
-az acr build --registry $ACR --image batepapo-server:v2 ./server
+az acr build --registry $ACR --image batepapo-server:v2 "$REPO#main:server"
 az containerapp update --resource-group $RG --name $APP --image $ACR.azurecr.io/batepapo-server:v2
 ```
 
@@ -283,8 +287,12 @@ O app usa banco cifrado (SQLCipher), câmera e outros módulos nativos. Por isso
 
 ### 2.1 Preparar (uma vez)
 
+Aqui é preciso o código no seu computador, com Node.js 22 ou mais novo:
+
 ```bash
-npm install                      # na raiz do repositório
+git clone https://github.com/rodrigoffonseca/bate-papo.git
+cd bate-papo
+npm install
 cd apps/mobile
 npm i -g eas-cli
 eas login
