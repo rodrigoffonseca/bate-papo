@@ -108,7 +108,7 @@ az postgres flexible-server create \
   --admin-user batepapo --admin-password "$PG_SENHA" \
   --public-access 0.0.0.0          # 0.0.0.0 = só serviços dentro da Azure
 
-az postgres flexible-server db create --resource-group $RG --server-name $PG --database-name batepapo
+az postgres flexible-server db create --resource-group $RG --server-name $PG --name batepapo
 
 DB_URL="postgres://batepapo:$PG_SENHA@$PG.postgres.database.azure.com:5432/batepapo?sslmode=require"
 ```
