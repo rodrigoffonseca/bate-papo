@@ -30,14 +30,14 @@ describe.skipIf(!dbUrl)('mídia no app', () => {
     const conv = directConversationId(ana.id);
 
     const photo = bytes(120_000, 7);
-    await ana.app.sendMedia(bia.id, {
+    await ana.app.sendMedia(directConversationId(bia.id), {
       kind: 'image', bytes: photo, mime: 'image/jpeg', width: 1600, height: 1200,
       thumbnail: 'miniatura', caption: 'pôr do sol',
     });
     const voice = bytes(40_000, 13);
-    await ana.app.sendMedia(bia.id, { kind: 'voice', bytes: voice, mime: 'audio/mp4', durationMs: 4200 });
+    await ana.app.sendMedia(directConversationId(bia.id), { kind: 'voice', bytes: voice, mime: 'audio/mp4', durationMs: 4200 });
     const video = bytes(500_000, 17);
-    await ana.app.sendMedia(bia.id, {
+    await ana.app.sendMedia(directConversationId(bia.id), {
       kind: 'video', bytes: video, mime: 'video/mp4', width: 1280, height: 720, durationMs: 9000, thumbnail: 'quadro',
     });
 
@@ -102,7 +102,7 @@ describe.skipIf(!dbUrl)('mídia no app', () => {
 
     offline = true;
     const photo = bytes(80_000, 3);
-    await app.sendMedia(fe.id, { kind: 'image', bytes: photo, mime: 'image/png' });
+    await app.sendMedia(directConversationId(fe.id), { kind: 'image', bytes: photo, mime: 'image/png' });
     const [failed] = await app.history.listMessages(directConversationId(fe.id));
     expect(failed).toMatchObject({ status: 'failed', mediaState: 'ready', attachment: { id: '' } });
     const stored = media.files.get(mediaKey(app.getState().me!.id, failed!.id));
@@ -129,7 +129,7 @@ describe.skipIf(!dbUrl)('mídia no app', () => {
     const gil = await signUp(baseUrl, 'gilmidia');
     const hugo = await signUp(baseUrl, 'hugomidia');
     await expect(
-      gil.app.sendMedia(hugo.id, { kind: 'voice', bytes: new Uint8Array(MEDIA_LIMITS.voice + 1), mime: 'audio/mp4' }),
+      gil.app.sendMedia(directConversationId(hugo.id), { kind: 'voice', bytes: new Uint8Array(MEDIA_LIMITS.voice + 1), mime: 'audio/mp4' }),
     ).rejects.toBeInstanceOf(MediaTooLargeError);
 
     // Um cliente manda um ponteiro para um arquivo que não existe mais.
@@ -153,9 +153,9 @@ describe.skipIf(!dbUrl)('mídia no app', () => {
     const bia = await signUp(baseUrl, 'bialimpa');
     const caio = await signUp(baseUrl, 'caiolimpa');
 
-    await bia.app.sendMedia(ana.id, { kind: 'image', bytes: bytes(100_000, 3), mime: 'image/jpeg' });
-    await bia.app.sendMedia(ana.id, { kind: 'voice', bytes: bytes(20_000, 5), mime: 'audio/mp4', durationMs: 2000 });
-    await caio.app.sendMedia(ana.id, { kind: 'image', bytes: bytes(50_000, 7), mime: 'image/jpeg' });
+    await bia.app.sendMedia(directConversationId(ana.id), { kind: 'image', bytes: bytes(100_000, 3), mime: 'image/jpeg' });
+    await bia.app.sendMedia(directConversationId(ana.id), { kind: 'voice', bytes: bytes(20_000, 5), mime: 'audio/mp4', durationMs: 2000 });
+    await caio.app.sendMedia(directConversationId(ana.id), { kind: 'image', bytes: bytes(50_000, 7), mime: 'image/jpeg' });
     const biaConv = directConversationId(bia.id);
     const caioConv = directConversationId(caio.id);
     await until(async () => ((await ana.app.mediaUsage()).byKind.image.count === 2 &&
@@ -202,7 +202,7 @@ describe.skipIf(!dbUrl)('mídia no app', () => {
     await dani.setPin(PIN);
     await dani.recoveryCodeSaved();
     offline = true;
-    await dani.sendMedia(ana.id, { kind: 'image', bytes: bytes(10_000, 9), mime: 'image/jpeg' });
+    await dani.sendMedia(directConversationId(ana.id), { kind: 'image', bytes: bytes(10_000, 9), mime: 'image/jpeg' });
     const [unsent] = await dani.history.listMessages(directConversationId(ana.id));
     expect(await dani.clearMedia()).toEqual({ count: 0, bytes: 0, skipped: 1 });
     expect(await dani.clearMediaItem(unsent!)).toBe(false);
@@ -225,9 +225,9 @@ describe.skipIf(!dbUrl)('mídia no app', () => {
     await eva.recoveryCodeSaved();
     const fabio = await signUp(baseUrl, 'fabiolimpa');
 
-    await eva.sendMedia(fabio.id, { kind: 'image', bytes: bytes(30_000, 2), mime: 'image/jpeg' });
+    await eva.sendMedia(directConversationId(fabio.id), { kind: 'image', bytes: bytes(30_000, 2), mime: 'image/jpeg' });
     now += 40 * 24 * 60 * 60 * 1000;
-    await eva.sendMedia(fabio.id, { kind: 'image', bytes: bytes(30_000, 4), mime: 'image/jpeg' });
+    await eva.sendMedia(directConversationId(fabio.id), { kind: 'image', bytes: bytes(30_000, 4), mime: 'image/jpeg' });
     expect((await eva.mediaUsage()).byKind.image.count).toBe(2);
 
     // Ligar a limpeza de 30 dias já apaga a foto de 40 dias atrás.

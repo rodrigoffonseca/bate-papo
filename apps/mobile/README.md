@@ -28,7 +28,12 @@ App para Android e iOS em React Native ([Expo](https://expo.dev) SDK 57 + Expo R
 
   As mensagens continuam na conversa, e a mídia apagada pode ser baixada de novo enquanto o servidor ainda tiver o arquivo (até 30 dias). Mídia ainda não enviada nunca é apagada.
 
-Próximas fatias: grupos e tela do número de segurança (QR code); notificações push.
+- **Grupos:** criar com nome e participantes (por @nome ou entre os contatos), conversar com texto, fotos, vídeos e voz, ver os participantes, adicionar e remover pessoas, tornar administrador, renomear e sair.
+  - Cada entrada, saída, troca de nome ou de administrador aparece como aviso na conversa para todos. Quem entra não vê as mensagens anteriores.
+  - O servidor avisa pelo WebSocket quando um grupo muda; ao reconectar, o app confere todos os grupos.
+  - Quem sai ou é removido mantém o histórico no aparelho, mas não pode mais enviar.
+
+Próximas fatias: tela do número de segurança (QR code); notificações push.
 
 ## Onde ficam os dados
 

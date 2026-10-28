@@ -313,6 +313,49 @@ func TestGroups(t *testing.T) {
 	}
 }
 
+func TestGroupNotifications(t *testing.T) {
+	ts := newTestServer(t)
+	alice, bob, carol := register(t, ts.URL), register(t, ts.URL), register(t, ts.URL)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	listen := func(c *client) *websocket.Conn {
+		conn, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(ts.URL, "http")+"/v1/ws?token="+c.token, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { conn.CloseNow() })
+		var msg map[string]any
+		if err := wsjson.Read(ctx, conn, &msg); err != nil || msg["type"] != "ready" {
+			t.Fatalf("esperava ready: %v %v", msg, err)
+		}
+		return conn
+	}
+	expect := func(conn *websocket.Conn, gid string) {
+		t.Helper()
+		var msg map[string]any
+		if err := wsjson.Read(ctx, conn, &msg); err != nil || msg["type"] != "group" || msg["group_id"] != gid {
+			t.Fatalf("esperava aviso do grupo %s: %v %v", gid, msg, err)
+		}
+	}
+	bobWS, carolWS := listen(bob), listen(carol)
+
+	gid := alice.must(201, "POST", "/v1/groups", map[string]any{"name": "Time", "members": []string{bob.id}})["id"].(string)
+	expect(bobWS, gid)
+	alice.must(200, "POST", "/v1/groups/"+gid+"/members", map[string]any{"user_ids": []string{carol.id}})
+	expect(bobWS, gid)
+	expect(carolWS, gid)
+	alice.must(200, "PATCH", "/v1/groups/"+gid, map[string]any{"name": "Time 2"})
+	expect(bobWS, gid)
+	expect(carolWS, gid)
+	alice.must(200, "PUT", "/v1/groups/"+gid+"/members/"+bob.id+"/role", map[string]any{"role": "admin"})
+	expect(bobWS, gid)
+	expect(carolWS, gid)
+	// Quem é removido também é avisado (e recebe 404 ao consultar o grupo).
+	bob.must(204, "DELETE", "/v1/groups/"+gid+"/members/"+carol.id, nil)
+	expect(carolWS, gid)
+	carol.must(404, "GET", "/v1/groups/"+gid, nil)
+}
+
 func TestAttachments(t *testing.T) {
 	ts := newTestServer(t)
 	alice, bob := register(t, ts.URL), register(t, ts.URL)

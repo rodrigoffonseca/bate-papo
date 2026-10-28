@@ -34,7 +34,7 @@ describe.skipIf(!dbUrl)('serviço do app com o servidor', () => {
     expect(conv).toBe(directConversationId(beto.app.getState().me!.id));
     await expect(ana.app.startConversation(ana.username)).rejects.toThrow(/você/);
 
-    await ana.app.sendText(beto.app.getState().me!.id, '  Oi, Beto!  ');
+    await ana.app.sendText(directConversationId(beto.app.getState().me!.id), '  Oi, Beto!  ');
     const [sent] = await ana.app.history.listMessages(conv);
     expect(sent).toMatchObject({ text: 'Oi, Beto!', outgoing: true, status: 'sent' });
 
@@ -48,10 +48,10 @@ describe.skipIf(!dbUrl)('serviço do app com o servidor', () => {
 
     // Com a conversa aberta, a resposta da Ana não conta como não lida.
     beto.app.setActiveConversation(directConversationId(anaId));
-    await beto.app.sendText(anaId, 'Oi, Ana!');
+    await beto.app.sendText(directConversationId(anaId), 'Oi, Ana!');
     await until(async () => ((await ana.app.history.listMessages(conv)).length === 2 ? true : undefined));
     ana.app.setActiveConversation(conv);
-    await ana.app.sendText(beto.app.getState().me!.id, 'Tudo bem?');
+    await ana.app.sendText(directConversationId(beto.app.getState().me!.id), 'Tudo bem?');
     await until(async () =>
       (await beto.app.history.listMessages(directConversationId(anaId))).length === 3 ? true : undefined,
     );
@@ -83,7 +83,7 @@ describe.skipIf(!dbUrl)('serviço do app com o servidor', () => {
     const conv = await app.startConversation(beto.username);
 
     offline = true;
-    await app.sendText(betoId, 'vai chegar depois');
+    await app.sendText(directConversationId(betoId), 'vai chegar depois');
     expect((await app.history.listMessages(conv))[0]).toMatchObject({ status: 'failed' });
 
     offline = false;

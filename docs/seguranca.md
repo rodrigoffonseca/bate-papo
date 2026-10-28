@@ -108,7 +108,7 @@ O que está no roteiro para reduzir metadados: *sealed sender* (esconder o remet
 - *Signed prekey* não é rotacionada periodicamente (rotação a cada reinstalação apenas).
 - O armazenamento local de chaves no app ainda precisa ser implementado sobre Keychain/Keystore e banco cifrado.
 - Remetente visível ao servidor (sem *sealed sender*).
-- Nome e membros de grupo visíveis ao servidor.
+- Nome e membros de grupo visíveis ao servidor. A lista de membros também é controlada pelo servidor: um servidor malicioso poderia incluir alguém no grupo para receber as próximas mensagens. A defesa atual é a transparência: o app registra na conversa cada entrada, saída e troca de administrador, visível a todos os membros, e quem entra não recebe mensagens anteriores. Mudanças de grupo assinadas pelos administradores (para que o servidor não possa forjá-las) estão no roteiro.
 
 ## Reportando vulnerabilidades
 

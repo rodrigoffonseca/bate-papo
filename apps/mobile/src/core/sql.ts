@@ -51,6 +51,23 @@ const MIGRATIONS = [
   ALTER TABLE messages ADD COLUMN attachment TEXT;
   ALTER TABLE messages ADD COLUMN media_state TEXT;
   `,
+  // Grupos: cópia local do estado no servidor, para mostrar nomes e membros
+  // sem rede e perceber (e mostrar na conversa) quem entrou e quem saiu.
+  `
+  CREATE TABLE groups (
+    id         TEXT PRIMARY KEY,
+    name       TEXT NOT NULL,
+    active     INTEGER NOT NULL DEFAULT 1,
+    updated_at INTEGER NOT NULL
+  );
+
+  CREATE TABLE group_members (
+    group_id TEXT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+    user_id  TEXT NOT NULL,
+    role     TEXT NOT NULL CHECK (role IN ('admin', 'member')),
+    PRIMARY KEY (group_id, user_id)
+  );
+  `,
 ];
 
 /** Aplica as migrações pendentes, controladas por PRAGMA user_version. */

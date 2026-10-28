@@ -16,7 +16,7 @@ describe('histórico local', () => {
     const h = await setup();
     await h.upsertContact({ id: 'ana', username: 'ana', displayName: 'Ana' });
     await h.saveIncoming({ from: 'ana', id: 'm1', kind: 'text', text: 'oi', sentAt: 1000 }, { read: false });
-    await h.saveOutgoing({ to: 'ana', id: 'm2', text: 'olá!', sentAt: 2000 });
+    await h.saveOutgoing({ conversationId: 'u:ana', id: 'm2', text: 'olá!', sentAt: 2000 });
 
     const [conv] = await h.listConversations();
     expect(conv).toMatchObject({ id: directConversationId('ana'), title: 'Ana', lastText: 'olá!', unread: 1 });
@@ -64,7 +64,7 @@ describe('histórico local', () => {
 
   it('limpa tudo no logout', async () => {
     const h = await setup();
-    await h.saveOutgoing({ to: 'a', id: '1', text: 'oi', sentAt: 1 });
+    await h.saveOutgoing({ conversationId: 'u:a', id: '1', text: 'oi', sentAt: 1 });
     await h.clear();
     expect(await h.listConversations()).toEqual([]);
   });

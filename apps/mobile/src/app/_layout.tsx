@@ -42,7 +42,10 @@ function Gate() {
       <Stack.Screen name="(auth)" options={{ headerShown: false }} />
       <Stack.Screen name="index" options={{ title: 'Bate-Papo' }} />
       <Stack.Screen name="nova" options={{ title: 'Nova conversa', presentation: 'modal' }} />
+      <Stack.Screen name="novo-grupo" options={{ title: 'Novo grupo', presentation: 'modal' }} />
       <Stack.Screen name="chat/[id]" options={{ title: '' }} />
+      <Stack.Screen name="grupo/[id]" options={{ title: 'Grupo' }} />
+      <Stack.Screen name="grupo/adicionar" options={{ title: 'Adicionar participantes', presentation: 'modal' }} />
       <Stack.Screen name="ajustes" options={{ title: 'Ajustes' }} />
       <Stack.Screen name="pin" options={{ title: '' }} />
       <Stack.Screen name="recuperacao" options={{ title: '' }} />

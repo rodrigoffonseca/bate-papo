@@ -78,6 +78,7 @@ Chaves públicas têm 32 bytes; assinaturas, 64. Máximo de 500 *one-time prekey
 servidor → {"type": "ready"}
 servidor → {"type": "envelope", "envelope": {...}}
 servidor → {"type": "alert", "alert": {...}}       (alerta de segurança da conta)
+servidor → {"type": "group", "group_id": "..."}    (um grupo seu mudou: busque GET /groups/{id}; 404 = você saiu ou foi removido)
 cliente  → {"type": "ack", "ids": ["..."]}
 ```
 

@@ -10,6 +10,7 @@ import {
   type MediaKind,
   BatePapoClient,
   type FetchLike,
+  type Group,
   KeyValueStorage,
   type ReceivedMessage,
   type User,
@@ -22,7 +23,9 @@ import {
   type MediaFilter,
   type Message,
   type StoredAttachment,
+  conversationTarget,
   directConversationId,
+  groupConversationId,
 } from './history';
 import { type MediaStore, extensionFor, mediaKey } from './media';
 import { SqlKV } from './kv';
@@ -70,6 +73,14 @@ export const MEDIA_LIMITS: Record<MediaKind, number> = {
 };
 /** Fotos e áudios até este tamanho são baixados assim que chegam; vídeos, só com um toque. */
 const AUTO_DOWNLOAD_BYTES = 8 * 1024 * 1024;
+
+/** Você saiu ou foi removido do grupo. */
+export class NotGroupMemberError extends Error {
+  constructor() {
+    super('Você não faz mais parte deste grupo');
+    this.name = 'NotGroupMemberError';
+  }
+}
 
 export class MediaTooLargeError extends Error {
   constructor(readonly kind: MediaKind, readonly limit: number) {
@@ -134,6 +145,8 @@ export class AppService {
   private activeConversation: string | null = null;
   private unsubscribers: (() => void)[] = [];
   private readonly now: () => number;
+  /** Atualizações de grupo uma de cada vez, para não registrar a mesma mudança duas vezes. */
+  private groupQueue: Promise<unknown> = Promise.resolve();
 
   constructor(private readonly deps: ServiceDeps) {
     this.history = new History(deps.db, () => this.state.me?.id ?? '');
@@ -198,7 +211,13 @@ export class AppService {
     });
     this.unsubscribers = [
       this.client.on('message', (m) => void this.onMessage(m)),
-      this.client.on('connection', (c) => this.set({ online: c === 'connected' })),
+      this.client.on('connection', (c) => {
+        this.set({ online: c === 'connected' });
+        // Ao (re)conectar, confere os grupos: alguém pode ter sido incluído ou
+        // removido enquanto o app estava fechado.
+        if (c === 'connected') void this.syncGroups().catch(() => undefined);
+      }),
+      this.client.on('groupChanged', ({ groupId }) => void this.refreshGroup(groupId).catch(() => undefined)),
       this.client.on('identityChanged', (c) => this.set({ identityAlert: { userId: c.userId, at: this.now() } })),
       this.client.on('accountAlert', (a) => {
         if (!this.state.accountAlerts.some((x) => x.id === a.id)) {
@@ -350,10 +369,13 @@ export class AppService {
 
   /** Busca um contato pelo @nome e abre (ou cria) a conversa com ele. */
   async startConversation(username: string): Promise<string> {
-    const user = await this.client.findByUsername(username.trim());
-    if (user.id === this.state.me?.id) throw new Error('Esse é você 🙂');
-    await this.history.upsertContact(toContact(user));
-    return this.history.ensureDirectConversation(user.id);
+    const contact = await this.findUser(username);
+    return this.history.ensureDirectConversation(contact.id);
+  }
+
+  /** Abre (ou cria) a conversa direta com um contato já conhecido. */
+  openDirectConversation(userId: string): Promise<string> {
+    return this.history.ensureDirectConversation(userId);
   }
 
   setActiveConversation(id: string | null): void {
@@ -361,12 +383,19 @@ export class AppService {
     if (id) void this.history.markRead(id);
   }
 
-  async sendText(peerId: string, text: string): Promise<void> {
+  /** Envia um texto na conversa (direta ou de grupo). */
+  async sendText(conversationId: string, text: string): Promise<void> {
     const body = text.trim();
     if (!body) return;
+    await this.assertCanSend(conversationId);
     const id = newMessageId();
-    await this.history.saveOutgoing({ to: peerId, id, text: body, sentAt: this.now() });
-    await this.deliver(peerId, id, body);
+    await this.history.saveOutgoing({ conversationId, id, text: body, sentAt: this.now() });
+    await this.deliver(conversationId, id, body);
+  }
+
+  private async assertCanSend(conversationId: string): Promise<void> {
+    const target = conversationTarget(conversationId);
+    if ('groupId' in target && !(await this.history.getGroup(target.groupId))?.active) throw new NotGroupMemberError();
   }
 
   /** Tenta reenviar uma mensagem que falhou (texto ou mídia). */
@@ -374,8 +403,8 @@ export class AppService {
     const m = await this.history.getOutgoing(id);
     if (!m) return;
     await this.history.setOutgoingStatus(id, 'sending');
-    if (m.kind === 'text') await this.deliver(m.to, id, m.text ?? '');
-    else await this.deliverMedia(m.to, id);
+    if (m.kind === 'text') await this.deliver(m.conversationId, id, m.text ?? '');
+    else await this.deliverMedia(m.conversationId, id);
   }
 
   // ---- fotos, vídeos e áudios ----
@@ -385,8 +414,9 @@ export class AppService {
    * aparelho antes de qualquer envio, então a mensagem aparece na hora e pode
    * ser reenviada se a rede falhar.
    */
-  async sendMedia(peerId: string, input: MediaInput): Promise<void> {
+  async sendMedia(conversationId: string, input: MediaInput): Promise<void> {
     if (input.bytes.length > MEDIA_LIMITS[input.kind]) throw new MediaTooLargeError(input.kind, MEDIA_LIMITS[input.kind]);
+    await this.assertCanSend(conversationId);
     const me = this.state.me!.id;
     const id = newMessageId();
     const enc = encryptAttachment(input.bytes);
@@ -403,11 +433,11 @@ export class AppService {
       ...(input.thumbnail && { thumbnail: input.thumbnail }),
     };
     const caption = input.caption?.trim() || null;
-    await this.history.saveOutgoing({ to: peerId, id, kind: input.kind, text: caption, sentAt: this.now(), attachment });
-    await this.deliverMedia(peerId, id);
+    await this.history.saveOutgoing({ conversationId, id, kind: input.kind, text: caption, sentAt: this.now(), attachment });
+    await this.deliverMedia(conversationId, id);
   }
 
-  private async deliverMedia(peerId: string, id: string): Promise<void> {
+  private async deliverMedia(conversationId: string, id: string): Promise<void> {
     const me = this.state.me!.id;
     try {
       const m = await this.history.getMessage(me, id);
@@ -426,7 +456,7 @@ export class AppService {
         pointer = { ...pointer, id: uploaded.id };
         await this.history.setMedia(me, id, { attachment: pointer });
       }
-      await this.client.sendAttachment({ userId: peerId }, m.kind as MediaKind, pointer, {
+      await this.client.sendAttachment(conversationTarget(conversationId), m.kind as MediaKind, pointer, {
         id,
         caption: m.text ?? undefined,
       });
@@ -530,18 +560,107 @@ export class AppService {
     return this.deps.media.deleteTemp(uri);
   }
 
-  private async deliver(peerId: string, id: string, text: string): Promise<void> {
+  private async deliver(conversationId: string, id: string, text: string): Promise<void> {
     try {
-      await this.client.sendText({ userId: peerId }, text, { id });
+      await this.client.sendText(conversationTarget(conversationId), text, { id });
       await this.history.setOutgoingStatus(id, 'sent');
     } catch {
       await this.history.setOutgoingStatus(id, 'failed');
     }
   }
 
+  // ---- grupos ----
+
+  /** Procura alguém pelo @nome (para iniciar conversa ou incluir num grupo). */
+  async findUser(username: string): Promise<Contact> {
+    const user = await this.client.findByUsername(username.trim().replace(/^@/, ''));
+    if (user.id === this.state.me?.id) throw new Error('Esse é você 🙂');
+    const contact = toContact(user);
+    await this.history.upsertContact(contact);
+    return contact;
+  }
+
+  /** Cria o grupo (você vira administrador) e devolve o ID da conversa. */
+  async createGroup(name: string, memberIds: string[]): Promise<string> {
+    const g = await this.client.createGroup(name.trim(), memberIds);
+    await this.serialGroups(() => this.applyGroup(g));
+    return groupConversationId(g.id);
+  }
+
+  async renameGroup(groupId: string, name: string): Promise<void> {
+    const g = await this.client.renameGroup(groupId, name.trim());
+    await this.serialGroups(() => this.applyGroup(g));
+  }
+
+  async addGroupMembers(groupId: string, userIds: string[]): Promise<void> {
+    const g = await this.client.addGroupMembers(groupId, userIds);
+    await this.serialGroups(() => this.applyGroup(g));
+  }
+
+  async removeGroupMember(groupId: string, userId: string): Promise<void> {
+    await this.client.removeGroupMember(groupId, userId);
+    await this.refreshGroup(groupId);
+  }
+
+  async setGroupAdmin(groupId: string, userId: string, admin: boolean): Promise<void> {
+    const g = await this.client.setGroupRole(groupId, userId, admin ? 'admin' : 'member');
+    await this.serialGroups(() => this.applyGroup(g));
+  }
+
+  /** Sai do grupo. O histórico continua no aparelho. */
+  async leaveGroup(groupId: string): Promise<void> {
+    await this.client.leaveGroup(groupId);
+    await this.serialGroups(() => this.history.deactivateGroup(groupId, this.now(), 'left'));
+  }
+
+  /** Busca o estado atual de um grupo no servidor e registra o que mudou. */
+  refreshGroup(groupId: string): Promise<void> {
+    return this.serialGroups(async () => {
+      const g = await this.client.getGroup(groupId);
+      if (g) await this.applyGroup(g);
+      else await this.history.deactivateGroup(groupId, this.now(), 'removed');
+    });
+  }
+
+  /** Confere todos os grupos (ao conectar). */
+  syncGroups(): Promise<void> {
+    return this.serialGroups(async () => {
+      const groups = await this.client.listGroups();
+      for (const g of groups) await this.applyGroup(g);
+      const current = new Set(groups.map((g) => g.id));
+      for (const id of await this.history.activeGroupIds()) {
+        if (!current.has(id)) await this.history.deactivateGroup(id, this.now(), 'removed');
+      }
+    });
+  }
+
+  private serialGroups<T>(fn: () => Promise<T>): Promise<T> {
+    const run = this.groupQueue.then(fn, fn);
+    this.groupQueue = run.catch(() => undefined);
+    return run;
+  }
+
+  private async applyGroup(g: Group): Promise<void> {
+    // Nomes dos membros para a lista e para os avisos ("Maria entrou no grupo").
+    for (const m of g.members) {
+      if (m.user_id === this.state.me?.id || (await this.history.getContact(m.user_id))) continue;
+      try {
+        await this.history.upsertContact(toContact(await this.client.api.getUser(m.user_id)));
+      } catch {
+        // Sem rede ou conta apagada: aparece como "Contato".
+      }
+    }
+    await this.history.saveGroup(g, this.now());
+  }
+
   private async onMessage(m: ReceivedMessage): Promise<void> {
-    // Grupos ainda não aparecem no app (próxima fatia).
-    if (m.groupId) return;
+    if (m.groupId) {
+      // Grupo desconhecido (ou remetente que não estava na lista): atualiza antes.
+      const g = await this.history.getGroup(m.groupId);
+      if (!g?.active || !g.members.some((x) => x.userId === m.from)) {
+        await this.refreshGroup(m.groupId).catch(() => undefined);
+      }
+    }
     if (!(await this.history.getContact(m.from))) {
       try {
         await this.history.upsertContact(toContact(await this.client.api.getUser(m.from)));
@@ -550,9 +669,10 @@ export class AppService {
       }
     }
     const sentAt = Math.min(m.sentAt, this.now() + MAX_CLOCK_SKEW_MS);
+    const conversationId = m.groupId ? groupConversationId(m.groupId) : directConversationId(m.from);
     const isNew = await this.history.saveIncoming(
-      { from: m.from, id: m.id, kind: m.kind, text: m.text, sentAt, attachment: m.attachment },
-      { read: this.activeConversation === directConversationId(m.from) },
+      { from: m.from, id: m.id, kind: m.kind, text: m.text, sentAt, attachment: m.attachment, groupId: m.groupId },
+      { read: this.activeConversation === conversationId },
     );
     // Fotos e áudios pequenos chegam já baixados; vídeos esperam um toque.
     if (isNew && m.attachment && m.kind !== 'video' && m.attachment.size <= AUTO_DOWNLOAD_BYTES) {
