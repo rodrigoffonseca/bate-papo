@@ -83,10 +83,21 @@ echo "$TEST_PHONES"    # anote: cada pessoa recebe o seu par número + código
 ```bash
 az login
 az extension add --name containerapp --upgrade
-az provider register --namespace Microsoft.App
-az provider register --namespace Microsoft.OperationalInsights
+
+# Assinaturas novas não vêm com todos os serviços liberados. Registre os que o
+# guia usa (cada um leva de 1 a 5 minutos; --wait espera terminar):
+for ns in Microsoft.App Microsoft.OperationalInsights Microsoft.DBforPostgreSQL \
+          Microsoft.ContainerRegistry Microsoft.Storage Microsoft.ManagedIdentity; do
+  az provider register --namespace $ns --wait
+done
+
+# Todos devem aparecer como "Registered":
+az provider list --query "[?contains('Microsoft.App Microsoft.OperationalInsights Microsoft.DBforPostgreSQL Microsoft.ContainerRegistry Microsoft.Storage Microsoft.ManagedIdentity', namespace)].{servico:namespace, estado:registrationState}" -o table
+
 az group create --name $RG --location $LOCAL
 ```
+
+Se algum comando der `subscription is not registered to use namespace …`, registre o serviço citado com `az provider register --namespace <nome> --wait` e rode o comando de novo. Registrar exige a função de Proprietário ou Colaborador na assinatura.
 
 ### 1.3 Banco de dados (PostgreSQL Flexible Server)
 
