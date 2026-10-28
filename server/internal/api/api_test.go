@@ -46,6 +46,12 @@ func randomLocalKeyer(t *testing.T) pepper.Keyer {
 // store, para os testes inspecionarem o banco.
 func newTestEnv(t *testing.T, keyer pepper.Keyer, opts ...func(*config.Config)) (*httptest.Server, *store.Store) {
 	t.Helper()
+	return newTestEnvWith(t, keyer, nil, opts...)
+}
+
+// newTestEnvWith permite ajustar o servidor antes de subir (ex.: serviços de push).
+func newTestEnvWith(t *testing.T, keyer pepper.Keyer, setup func(*Server), opts ...func(*config.Config)) (*httptest.Server, *store.Store) {
+	t.Helper()
 	url := os.Getenv("BATEPAPO_TEST_DATABASE_URL")
 	if url == "" {
 		t.Skip("BATEPAPO_TEST_DATABASE_URL não definido")
@@ -77,6 +83,9 @@ func newTestEnv(t *testing.T, keyer pepper.Keyer, opts ...func(*config.Config)) 
 	}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	srv := New(cfg, st, blobs, sms.Console{Log: log}, keyer, log)
+	if setup != nil {
+		setup(srv)
+	}
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 	return ts, st

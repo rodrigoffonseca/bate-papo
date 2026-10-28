@@ -47,6 +47,8 @@ type Server struct {
 	bundleLimiter *RateLimiter // por usuário
 	// pinCheckLimiter: conferência do PIN pelo próprio dono (lembrete).
 	pinCheckLimiter *RateLimiter // por usuário
+
+	pusher *pushState
 }
 
 func New(cfg *config.Config, st *store.Store, blobs *blob.FS, sender sms.Sender, pinKeyer pepper.Keyer, log *slog.Logger) *Server {
@@ -64,6 +66,7 @@ func New(cfg *config.Config, st *store.Store, blobs *blob.FS, sender sms.Sender,
 		lookupLimiter:   NewRateLimiter(120, time.Hour),
 		bundleLimiter:   NewRateLimiter(600, time.Hour),
 		pinCheckLimiter: NewRateLimiter(10, time.Hour),
+		pusher:          newPushState(nil),
 	}
 }
 
@@ -112,6 +115,10 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("PUT /v1/groups/{id}/members/{userId}/role", s.authed(s.handleSetRole))
 	mux.Handle("POST /v1/groups/{id}/messages", s.authed(s.handleSendGroup))
 
+	mux.Handle("GET /v1/push", s.authed(s.handleGetPush))
+	mux.Handle("PUT /v1/push", s.authed(s.handlePutPush))
+	mux.Handle("DELETE /v1/push", s.authed(s.handleDeletePush))
+
 	mux.Handle("POST /v1/attachments", s.authed(s.handleUploadAttachment))
 	mux.Handle("GET /v1/attachments/{id}", s.authed(s.handleDownloadAttachment))
 
@@ -138,6 +145,7 @@ func (s *Server) RunJanitor(ctx context.Context, every time.Duration) {
 		s.lookupLimiter.Cleanup()
 		s.bundleLimiter.Cleanup()
 		s.pinCheckLimiter.Cleanup()
+		s.pusher.cleanup(time.Now())
 		select {
 		case <-ctx.Done():
 			return

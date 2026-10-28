@@ -33,7 +33,15 @@ App para Android e iOS em React Native ([Expo](https://expo.dev) SDK 57 + Expo R
   - O servidor avisa pelo WebSocket quando um grupo muda; ao reconectar, o app confere todos os grupos.
   - Quem sai ou é removido mantém o histórico no aparelho, mas não pode mais enviar.
 
-Próximas fatias: tela do número de segurança (QR code); notificações push.
+- **Número de segurança:** na tela do contato (ⓘ na conversa, ou tocando em alguém no grupo), com os 60 dígitos e o QR code.
+  - Ler com a câmera o código do celular da outra pessoa marca o contato como verificado (✅ na conversa).
+  - Se a chave mudar depois, a conversa mostra um aviso até a verificação ser refeita.
+- **Notificações sem conteúdo:** o aviso diz só "Você tem novas mensagens" (ou "Alerta de segurança na sua conta"). Liga e desliga em Ajustes.
+  - Usa o token FCM (Android) ou APNs (iOS) do próprio aparelho, sem passar pelo serviço de push da Expo.
+  - No Android, o build precisa do Firebase: coloque o `google-services.json` do seu projeto e aponte `android.googleServicesFile` no `app.json`. Sem ele, o app funciona e mostra as notificações como indisponíveis.
+  - O servidor já aceita UnifiedPush (Android sem Google); falta o módulo nativo no app.
+
+Próximas fatias: UnifiedPush no app; assinatura das mudanças de grupo pelos administradores.
 
 ## Onde ficam os dados
 

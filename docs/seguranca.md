@@ -73,6 +73,8 @@ Hoje o arquivo inteiro é cifrado na memória do celular, o que limita vídeos a
 - **TOFU** (*trust on first use*): a primeira chave de identidade vista de um contato é registrada.
 - Se a chave mudar (reinstalação ou ataque), o SDK emite `identityChanged`. Com `identityChangePolicy: 'reject'`, a comunicação é bloqueada até o usuário confirmar.
 - **Número de segurança**: 60 dígitos, iguais nos dois aparelhos, para comparar pessoalmente ou por QR code — é o que derrota um servidor malicioso que tente se passar por um contato.
+  - No app, a tela do contato mostra o número e o QR code; ler o código do celular da outra pessoa marca o contato como **verificado**.
+  - A marca vale para a chave conferida: se a chave do contato mudar, o app mostra um aviso na conversa ("você tinha verificado…") até que o número seja conferido de novo.
 
 ## O que o servidor vê (metadados)
 
@@ -83,7 +85,10 @@ Sendo transparentes — no MVP o servidor **vê**:
 - quem envia para quem e quando (até a entrega), e o tamanho aproximado (com padding) de cada mensagem;
 - nome, membros e administradores dos grupos;
 - tamanho dos anexos;
-- endereço IP das conexões (não é gravado em log pelo servidor, mas está disponível para quem opera a rede).
+- endereço IP das conexões (não é gravado em log pelo servidor, mas está disponível para quem opera a rede);
+- o token de push do aparelho, se as notificações estiverem ligadas.
+
+Com notificações ligadas, o serviço de push (Google, Apple ou o distribuidor UnifiedPush) fica sabendo **que** chegou algo para o aparelho e quando, mas não o conteúdo, o remetente ou o grupo: o aviso tem sempre o mesmo texto. Quem não quiser nem isso pode desligar as notificações no app.
 
 O servidor **não vê**: conteúdo de mensagens, fotos, áudios, legendas, tipo de mensagem, chaves privadas, tokens de sessão em claro.
 

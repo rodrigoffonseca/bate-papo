@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/rodrigoffonseca/bate-papo/server/internal/pepper"
+	"github.com/rodrigoffonseca/bate-papo/server/internal/push"
 	"github.com/rodrigoffonseca/bate-papo/server/internal/store"
 )
 
@@ -58,6 +59,7 @@ func (s *Server) alert(r *http.Request, userID uuid.UUID, kind string) {
 		return
 	}
 	s.hub.NotifyAlert(userID, a)
+	s.wake(userID, push.Alert)
 }
 
 // handleUnlock conclui um registro barrado pelo PIN, com o PIN ou com o

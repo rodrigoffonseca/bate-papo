@@ -28,6 +28,12 @@ export interface AccountAlert {
   created_at: string;
 }
 
+/**
+ * Tipo de token de push: FCM (Android), APNs (iOS) ou UnifiedPush (endereço
+ * do distribuidor escolhido pela pessoa, sem Google/Apple).
+ */
+export type PushKind = 'fcm' | 'apns' | 'unifiedpush';
+
 export interface GroupMember {
   user_id: string;
   role: 'admin' | 'member';
@@ -165,6 +171,19 @@ export class Api {
 
   ackAlerts(ids: string[]) {
     return this.request<void>('POST', '/v1/account/alerts/ack', { ids });
+  }
+
+  getPush() {
+    return this.request<{ available: PushKind[]; registered: PushKind | null }>('GET', '/v1/push');
+  }
+
+  /** Lança ApiError 400 com body.code = "push_unavailable" se o servidor não envia por esse tipo. */
+  setPush(kind: PushKind, token: string) {
+    return this.request<void>('PUT', '/v1/push', { kind, token });
+  }
+
+  deletePush() {
+    return this.request<void>('DELETE', '/v1/push');
   }
 
   logout() {

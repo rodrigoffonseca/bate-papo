@@ -70,7 +70,9 @@ Cadastrar o mesmo número em outro aparelho (ou reinstalar) mantém a conta, nom
 
 ## Escalando
 
-O MVP roda em uma instância. Para várias instâncias atrás de um balanceador:
+O servidor é um **monólito modular**: um único serviço em container, com módulos de fronteiras bem definidas, que podem virar serviços próprios quando a escala pedir. A estratégia completa (motivos, fronteiras, pontos de extensão e quando separar) está na seção 2 de [arquitetura-funcional.md](arquitetura-funcional.md).
+
+O MVP roda em uma instância. Para várias instâncias (réplicas do mesmo container) atrás de um balanceador:
 
 - trocar o `Hub` em memória (`server/internal/api/hub.go`) por Postgres `LISTEN/NOTIFY` ou outro barramento;
 - trocar os limitadores de taxa em memória por armazenamento compartilhado;

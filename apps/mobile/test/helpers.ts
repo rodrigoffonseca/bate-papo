@@ -13,7 +13,7 @@ import { fileURLToPath } from 'node:url';
 import { expect } from 'vitest';
 
 import { MemoryMediaStore } from '../src/core/media';
-import { AppService } from '../src/core/service';
+import { AppService, type PushPlatform } from '../src/core/service';
 import { nodeSql } from './node-sql';
 
 export const dbUrl = process.env.BATEPAPO_TEST_DATABASE_URL;
@@ -72,6 +72,8 @@ export async function startServer(): Promise<{ baseUrl: string; stop: () => void
       BATEPAPO_DATABASE_URL: dbUrl,
       BATEPAPO_DEV_EXPOSE_OTP: 'true',
       BATEPAPO_BLOB_DIR: join(tmp, 'blobs'),
+      // Os testes recebem as notificações UnifiedPush num servidor local.
+      BATEPAPO_PUSH_ALLOW_PRIVATE_ENDPOINTS: 'true',
     },
     stdio: ['ignore', 'ignore', 'inherit'],
   });
@@ -86,8 +88,8 @@ export async function startServer(): Promise<{ baseUrl: string; stop: () => void
 }
 
 /** Cadastro completo pelo serviço: código SMS, perfil e PIN. */
-export async function signUp(baseUrl: string, name: string, media = new MemoryMediaStore()) {
-  const app = new AppService({ db: nodeSql(), media, serverUrl: baseUrl });
+export async function signUp(baseUrl: string, name: string, media = new MemoryMediaStore(), push?: PushPlatform) {
+  const app = new AppService({ db: nodeSql(), media, serverUrl: baseUrl, push });
   await app.init();
   expect(app.getState().phase).toBe('signed-out');
   const phone = nextPhone();

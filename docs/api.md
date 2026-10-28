@@ -72,6 +72,19 @@ Chaves públicas têm 32 bytes; assinaturas, 64. Máximo de 500 *one-time prekey
 - `ciphertext`: até 64 KiB.
 - `410 {stale: [userId]}`: o `registration_id` não é o atual do destinatário (ele reinstalou o app). Refaça a sessão e reenvie.
 
+## Notificações push
+
+| Método | Rota | Corpo | Resposta |
+| --- | --- | --- | --- |
+| GET | `/push` | — | `{available: ["fcm" \| "apns" \| "unifiedpush"], registered: tipo \| null}` |
+| PUT | `/push` | `{kind, token}` | `204` · `400 {code: "push_unavailable"}` se o servidor não envia por esse tipo |
+| DELETE | `/push` | — | `204` |
+
+- Um token por conta. É apagado ao sair (`/auth/logout`), quando o número é registrado em outro aparelho e quando o serviço de push diz que ele não vale mais.
+- `unifiedpush`: o token é o endereço HTTPS do distribuidor. Endereços internos (localhost, rede privada, metadados da nuvem) são recusados.
+- O servidor só acorda o aparelho quando o app está fechado (sem WebSocket), no máximo uma vez a cada 30 segundos por causa de mensagens. Alertas de segurança da conta sempre acordam.
+- A notificação não leva nada da mensagem: título "Bate-Papo" e o texto fixo "Você tem novas mensagens" ou "Alerta de segurança na sua conta". No UnifiedPush, o corpo é só `{"t": "message"}` ou `{"t": "alert"}`.
+
 ### WebSocket
 
 ```
